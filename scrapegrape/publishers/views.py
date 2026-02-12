@@ -1,5 +1,4 @@
 from django.db.models import Subquery, OuterRef
-from django.shortcuts import render
 from inertia import render as inertia_render
 
 from ingestion.models import TermsDiscoveryResult, TermsEvaluationResult
@@ -59,7 +58,9 @@ def table(request):
 
     serialized = PublisherWithReportsSerializer(result, many=True)
 
-    return render(request, "index.html", {"serialized": serialized.data})
+    return inertia_render(request, 'Publishers/Index', props={
+        'publishers': serialized.data
+    })
 
 
 def inertia_smoke_test(request):

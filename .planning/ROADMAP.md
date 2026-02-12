@@ -99,6 +99,12 @@ Plans:
 
 **Dependencies:** Phase 3 (core view must work before adding interactive features)
 
+**Plans:** 2 plans
+
+Plans:
+- [ ] 04-01-PLAN.md -- Implement form submissions (create/edit publisher, bulk CSV upload) with useForm and validation errors
+- [ ] 04-02-PLAN.md -- Add partial reloads for table filtering and deferred props for expensive data
+
 **Requirements:**
 - INRT-08: useForm hook used for form submissions with validation error display
 - VIEW-03: Lazy props used for expensive data that isn't immediately needed
@@ -143,7 +149,7 @@ Plans:
 | 1 - Inertia Infrastructure | Complete (2026-02-12) | 4 | 100% |
 | 2 - Frontend Consolidation | Complete (2026-02-12) | 4 | 100% |
 | 3 - Core View Migration | Complete (2026-02-12) | 5 | 100% |
-| 4 - Interactive Features | Pending | 3 | 0% |
+| 4 - Interactive Features | Planned | 3 | 0% |
 | 5 - Cleanup & Verification | Pending | 4 | 0% |
 
 **Overall:** 13/20 requirements complete (65%)
@@ -190,4 +196,4 @@ Each phase must complete before the next begins. This ordering minimizes risk by
 ---
 
 *Roadmap created: 2026-02-12*
-*Next: `/gsd:plan-phase 4`*
+*Next: `/gsd:execute-phase 04-interactive-features`*

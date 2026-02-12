@@ -21,17 +21,17 @@
 
 ## Current Position
 
-**Phase:** Phase 2 - Frontend Consolidation
-**Plan:** 02-01 (completed)
-**Status:** Phase 2 Plan 1 complete - ready for Phase 3
+**Phase:** Phase 3 - Core View Migration
+**Plan:** 03-01 (completed)
+**Status:** Phase 3 Plan 1 complete - ready for 03-02
 
 **Progress Bar:**
 ```
-[▓▓▓▓▱▱▱▱▱▱] 8/20 requirements (40%)
+[▓▓▓▓▓▱▱▱▱▱] 10/20 requirements (50%)
 
 Phase 1: [▓▓▓▓] 4/4 (complete)
 Phase 2: [▓▓▓▓] 4/4 (complete)
-Phase 3: [▱▱▱▱▱] 0/5
+Phase 3: [▓▓▱▱▱] 2/5 (VIEW-01, VIEW-02)
 Phase 4: [▱▱▱] 0/3
 Phase 5: [▱▱▱▱] 0/4
 ```
@@ -42,9 +42,9 @@ Phase 5: [▱▱▱▱] 0/4
 
 ### Velocity
 
-- **Requirements completed:** 8 (INRT-01 to INRT-04, CONS-01 to CONS-04)
-- **Average time per requirement:** 4.25 min (34 min / 8 requirements)
-- **Estimated remaining:** 12 requirements (projected: ~51 minutes)
+- **Requirements completed:** 10 (INRT-01 to INRT-04, CONS-01 to CONS-04, VIEW-01 to VIEW-02)
+- **Average time per requirement:** 3.7 min (37 min / 10 requirements)
+- **Estimated remaining:** 10 requirements (projected: ~37 minutes)
 
 ### Quality
 
@@ -65,6 +65,7 @@ Phase 5: [▱▱▱▱] 0/4
 |-------|------|----------|-------|-------|--------------|-----------|
 | 01    | 01   | 33 min   | 3     | 10    | 4 (INRT-01 to INRT-04) | 2026-02-12 |
 | 02    | 01   | 1 min    | 3     | 30+   | 4 (CONS-01 to CONS-04) | 2026-02-12 |
+| 03    | 01   | 3 min    | 2     | 4     | 2 (VIEW-01 to VIEW-02) | 2026-02-12 |
 
 ---
 
@@ -82,6 +83,8 @@ Phase 5: [▱▱▱▱] 0/4
 | 2026-02-12 | Eager page loading for import.meta.glob | Better tree-shaking and build-time error detection | Improved DX and build validation |
 | 2026-02-12 | Dual directory convention for Inertia (PascalCase) and existing code (lowercase) | Prevents naming conflicts, maintains clarity between new Inertia components and existing shadcn/TanStack code | Clear separation for Phase 3+ migration |
 | 2026-02-12 | Added STATICFILES_DIRS to Django settings | Required for collectstatic to find Vite-built assets in production deployment | Production static file serving |
+| 2026-02-12 | Removed legacy dual-path in Phase 3 instead of Phase 5 | Since "/" is now Inertia-rendered, dual-path detection no longer needed | Simplifies codebase immediately |
+| 2026-02-12 | Preserved exact Subquery optimization pattern | Critical for avoiding N+1 queries (VIEW-02 requirement) | Query count stays at ~4 regardless of publisher count |
 
 ### Active Todos
 
@@ -90,8 +93,9 @@ Phase 5: [▱▱▱▱] 0/4
 - [x] Validate Django 5.2 and React 19.1 compatibility with Inertia
 - [x] Plan Phase 2 (Frontend Consolidation)
 - [x] Execute Phase 2 Plan 1 (Frontend Consolidation)
-- [ ] Plan Phase 3 (View Migration)
-- [ ] Review publisher table view migration approach
+- [x] Plan Phase 3 (View Migration)
+- [x] Execute Phase 3 Plan 1 (Core View Migration)
+- [ ] Execute Phase 3 Plan 2 (Shared data, layouts, navigation)
 
 ### Known Blockers
 
@@ -115,37 +119,37 @@ None currently.
 
 ### What Just Happened
 
-Phase 2 Plan 1 (Frontend Consolidation) completed successfully. Moved React frontend from sgui/ to scrapegrape/frontend/, updated Django settings (manifest_path, STATICFILES_DIRS, STATIC_URL), updated Docker Compose volume mounts, established Inertia directory structure (Pages/, Components/, Layouts/), and verified dev HMR and production build pipeline. All 4 Phase 2 requirements (CONS-01 through CONS-04) delivered. Duration: 1 minute for 4 requirements.
+Phase 3 Plan 1 (Core View Migration) completed successfully. Converted publisher table view from Django template render to inertia_render() with direct prop passing. Created Pages/Publishers/Index.tsx wrapping existing DataTable. Removed legacy dual-path entry point and #root div from base template. Preserved Subquery optimization and DRF serializer reuse. Requirements VIEW-01 and VIEW-02 delivered. Duration: 3 minutes for 2 requirements.
 
 ### What's Next
 
-Begin Phase 3 (View Migration) via `/gsd:plan-phase 3`. Phase 3 converts the publisher list view from JSON-in-template to Inertia, migrating the existing TanStack table to an Inertia page component. Critical success factor: preserve exact functionality while switching rendering architecture—no feature changes, only architectural refactor.
+Execute Phase 3 Plan 2 (03-02-PLAN.md) to add shared data middleware, persistent AppLayout, and Inertia Link navigation. This completes the multi-page foundation by enabling flash messages, auth state across pages, and SPA-like navigation between routes.
 
 ### Context for Next Session
 
-**If starting Phase 3 planning:**
-- Phase 3 goal: Migrate publisher list view from JSON-in-template to Inertia rendering
-- Phase 3 requirements: VIEW-01 through VIEW-05
-- Phase 3 success criteria: Publisher table renders identically via Inertia, maintains all functionality
-- Phase 2 artifacts now available: Consolidated frontend in scrapegrape/frontend/, Inertia directory structure, verified build pipeline
+**If starting Phase 3 Plan 2:**
+- Goal: Add shared data middleware, persistent layouts, Inertia Link navigation
+- Requirements: INRT-05, INRT-06, INRT-07
+- Success criteria: Flash messages and auth state available across pages, layouts persist during navigation, Link components enable SPA-like transitions
+- Phase 3 Plan 1 artifacts: Publishers/Index.tsx pattern, Inertia-only entry point, DRF serializer reuse confirmed
 
 **Completed phases artifacts to reference:**
 - .planning/phases/01-inertia-infrastructure/01-01-SUMMARY.md (Inertia infrastructure setup)
 - .planning/phases/02-frontend-consolidation/02-01-SUMMARY.md (Frontend consolidation)
-- scrapegrape/frontend/src/main.tsx (dual-path entry point pattern)
-- scrapegrape/frontend/src/Pages/Debug/InertiaTest.tsx (Inertia page component example)
-- scrapegrape/frontend/src/datatable/ (existing TanStack table implementation to migrate)
+- .planning/phases/03-core-view-migration/03-01-SUMMARY.md (Core view migration)
+- scrapegrape/frontend/src/Pages/Publishers/Index.tsx (Inertia page component pattern)
+- scrapegrape/publishers/views.py (inertia_render usage, DRF serializer reuse)
 
 ---
 
 ### Last Session
 
 - **Date:** 2026-02-12
-- **Stopped at:** Completed Phase 2 Plan 1 (02-01-PLAN.md)
-- **Next action:** Plan Phase 3 via `/gsd:plan-phase 3`
+- **Stopped at:** Completed Phase 3 Plan 1 (03-01-PLAN.md)
+- **Next action:** Execute Phase 3 Plan 2 via `/gsd:execute-phase 03-core-view-migration` (or plan it first if 03-02-PLAN.md doesn't exist)
 
 ---
 
 *State initialized: 2026-02-12*
 *Last updated: 2026-02-12*
-*Ready for: Phase 3 planning*
+*Ready for: Phase 3 Plan 2*

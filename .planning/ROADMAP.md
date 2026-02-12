@@ -19,7 +19,7 @@ Refactor from JSON-in-template rendering to django-inertia while consolidating f
 **Plans:** 1 plan
 
 Plans:
-- [ ] 01-01-PLAN.md -- Install and configure Inertia backend/frontend, validate with smoke test
+- [x] 01-01-PLAN.md -- Install and configure Inertia backend/frontend, validate with smoke test
 
 **Requirements:**
 - INRT-01: Django middleware and settings configured for Inertia
@@ -42,6 +42,11 @@ Plans:
 **Goal:** Frontend source moved from sgui/ to scrapegrape/frontend/ with working build pipeline.
 
 **Dependencies:** Phase 1 (Inertia infrastructure must exist before moving frontend files)
+
+**Plans:** 1 plan
+
+Plans:
+- [ ] 02-01-PLAN.md -- Move sgui/ to scrapegrape/frontend/, update Django/Vite/Docker paths, verify build pipeline
 
 **Requirements:**
 - CONS-01: React source moved from sgui/ to scrapegrape/frontend/
@@ -130,7 +135,7 @@ Plans:
 | Phase | Status | Requirements | Completion |
 |-------|--------|--------------|------------|
 | 1 - Inertia Infrastructure | Complete (2026-02-12) | 4 | 100% |
-| 2 - Frontend Consolidation | Pending | 4 | 0% |
+| 2 - Frontend Consolidation | Planned | 4 | 0% |
 | 3 - Core View Migration | Pending | 5 | 0% |
 | 4 - Interactive Features | Pending | 3 | 0% |
 | 5 - Cleanup & Verification | Pending | 4 | 0% |
@@ -179,4 +184,4 @@ Each phase must complete before the next begins. This ordering minimizes risk by
 ---
 
 *Roadmap created: 2026-02-12*
-*Next: `/gsd:plan-phase 1`*
+*Next: `/gsd:execute-phase 2`*

@@ -16,6 +16,11 @@ Refactor from JSON-in-template rendering to django-inertia while consolidating f
 
 **Dependencies:** None (foundation phase)
 
+**Plans:** 1 plan
+
+Plans:
+- [ ] 01-01-PLAN.md -- Install and configure Inertia backend/frontend, validate with smoke test
+
 **Requirements:**
 - INRT-01: Django middleware and settings configured for Inertia
 - INRT-02: Base template updated with CSRF meta tag and Inertia root div

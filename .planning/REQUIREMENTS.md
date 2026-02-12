@@ -71,32 +71,32 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INRT-01 | — | Pending |
-| INRT-02 | — | Pending |
-| INRT-03 | — | Pending |
-| INRT-04 | — | Pending |
-| INRT-05 | — | Pending |
-| INRT-06 | — | Pending |
-| INRT-07 | — | Pending |
-| INRT-08 | — | Pending |
-| CONS-01 | — | Pending |
-| CONS-02 | — | Pending |
-| CONS-03 | — | Pending |
-| CONS-04 | — | Pending |
-| VIEW-01 | — | Pending |
-| VIEW-02 | — | Pending |
-| VIEW-03 | — | Pending |
-| VIEW-04 | — | Pending |
-| CLEN-01 | — | Pending |
-| CLEN-02 | — | Pending |
-| CLEN-03 | — | Pending |
-| CLEN-04 | — | Pending |
+| INRT-01 | Phase 1 | Pending |
+| INRT-02 | Phase 1 | Pending |
+| INRT-03 | Phase 1 | Pending |
+| INRT-04 | Phase 1 | Pending |
+| CONS-01 | Phase 2 | Pending |
+| CONS-02 | Phase 2 | Pending |
+| CONS-03 | Phase 2 | Pending |
+| CONS-04 | Phase 2 | Pending |
+| VIEW-01 | Phase 3 | Pending |
+| VIEW-02 | Phase 3 | Pending |
+| INRT-05 | Phase 3 | Pending |
+| INRT-06 | Phase 3 | Pending |
+| INRT-07 | Phase 3 | Pending |
+| INRT-08 | Phase 4 | Pending |
+| VIEW-03 | Phase 4 | Pending |
+| VIEW-04 | Phase 4 | Pending |
+| CLEN-01 | Phase 5 | Pending |
+| CLEN-02 | Phase 5 | Pending |
+| CLEN-03 | Phase 5 | Pending |
+| CLEN-04 | Phase 5 | Pending |
 
 **Coverage:**
 - v1.0 requirements: 20 total
-- Mapped to phases: 0
-- Unmapped: 20 ⚠️
+- Mapped to phases: 20
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-12*
-*Last updated: 2026-02-12 after initial definition*
+*Last updated: 2026-02-12 after roadmap creation*

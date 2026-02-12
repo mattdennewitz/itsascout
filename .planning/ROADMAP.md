@@ -102,8 +102,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 04-01-PLAN.md -- Implement form submissions (create/edit publisher, bulk CSV upload) with useForm and validation errors
-- [ ] 04-02-PLAN.md -- Add partial reloads for table filtering and deferred props for expensive data
+- [x] 04-01-PLAN.md -- Implement form submissions (create/edit publisher, bulk CSV upload) with useForm and validation errors
+- [x] 04-02-PLAN.md -- Add partial reloads for table filtering and deferred props for expensive data
 
 **Requirements:**
 - INRT-08: useForm hook used for form submissions with validation error display
@@ -149,10 +149,10 @@ Plans:
 | 1 - Inertia Infrastructure | Complete (2026-02-12) | 4 | 100% |
 | 2 - Frontend Consolidation | Complete (2026-02-12) | 4 | 100% |
 | 3 - Core View Migration | Complete (2026-02-12) | 5 | 100% |
-| 4 - Interactive Features | Planned | 3 | 0% |
+| 4 - Interactive Features | Complete (2026-02-12) | 3 | 100% |
 | 5 - Cleanup & Verification | Pending | 4 | 0% |
 
-**Overall:** 13/20 requirements complete (65%)
+**Overall:** 16/20 requirements complete (80%)
 
 ---
 

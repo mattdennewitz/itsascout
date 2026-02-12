@@ -10,7 +10,7 @@ Requirements for Inertia refactor milestone. Each maps to roadmap phases.
 ### Inertia Integration
 
 - [ ] **INRT-01**: Django middleware and settings configured for Inertia (InertiaMiddleware, INERTIA_LAYOUT)
-- [ ] **INRT-02**: Base template updated with CSRF meta tag and Inertia root div
+- [ ] **INRT-02**: Base template updated with Inertia root div; CSRF handled via Axios cookie config (not meta tag — see 01-RESEARCH.md anti-patterns)
 - [ ] **INRT-03**: Frontend entry point uses `createInertiaApp` with `import.meta.glob` page resolution
 - [ ] **INRT-04**: CSRF configured correctly for Axios/Inertia POST requests
 - [ ] **INRT-05**: Navigation between pages uses Inertia `<Link>` component (no React Router)

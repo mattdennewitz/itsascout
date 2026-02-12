@@ -22,17 +22,17 @@
 ## Current Position
 
 **Phase:** Phase 4 - Interactive Features
-**Plan:** 04-01 (completed)
-**Status:** Phase 4 in progress - 1 of 3 requirements delivered
+**Plan:** 04-02 (completed)
+**Status:** Phase 4 complete - 3 of 3 requirements delivered
 
 **Progress Bar:**
 ```
-[▓▓▓▓▓▓▓▓▱▱] 14/20 requirements (70%)
+[▓▓▓▓▓▓▓▓▓▱] 16/20 requirements (80%)
 
 Phase 1: [▓▓▓▓] 4/4 (complete)
 Phase 2: [▓▓▓▓] 4/4 (complete)
 Phase 3: [▓▓▓▓▓] 5/5 (complete - VIEW-01, VIEW-02, INRT-05, INRT-06, INRT-07)
-Phase 4: [▓▱▱] 1/3 (INRT-08)
+Phase 4: [▓▓▓] 3/3 (complete - INRT-08, VIEW-03, VIEW-04)
 Phase 5: [▱▱▱▱] 0/4
 ```
 
@@ -42,9 +42,9 @@ Phase 5: [▱▱▱▱] 0/4
 
 ### Velocity
 
-- **Requirements completed:** 14 (INRT-01 to INRT-08, CONS-01 to CONS-04, VIEW-01 to VIEW-02)
-- **Average time per requirement:** 3.2 min (45 min / 14 requirements)
-- **Estimated remaining:** 6 requirements (projected: ~19 minutes)
+- **Requirements completed:** 16 (INRT-01 to INRT-08, CONS-01 to CONS-04, VIEW-01 to VIEW-04)
+- **Average time per requirement:** 2.9 min (47 min / 16 requirements)
+- **Estimated remaining:** 4 requirements (projected: ~12 minutes)
 
 ### Quality
 
@@ -55,9 +55,9 @@ Phase 5: [▱▱▱▱] 0/4
 ### Milestone
 
 - **Started:** 2026-02-12
-- **Target completion:** 2026-02-12 (estimated based on 3.2 min/requirement × 6 remaining = ~19 minutes)
+- **Target completion:** 2026-02-12 (estimated based on 2.9 min/requirement × 4 remaining = ~12 minutes)
 - **Days elapsed:** 0
-- **Phases completed:** 3/5 (60%, Phase 4 in progress)
+- **Phases completed:** 4/5 (80%, Phase 5 remaining)
 
 ### Plan Execution History
 
@@ -68,6 +68,7 @@ Phase 5: [▱▱▱▱] 0/4
 | 03    | 01   | 3 min    | 2     | 4     | 2 (VIEW-01 to VIEW-02) | 2026-02-12 |
 | 03    | 02   | 4 min    | 3     | 4     | 3 (INRT-05 to INRT-07) | 2026-02-12 |
 | 04    | 01   | 4 min    | 2     | 11    | 1 (INRT-08) | 2026-02-12 |
+| 04    | 02   | 2 min    | 2     | 2     | 2 (VIEW-03, VIEW-04) | 2026-02-12 |
 
 ## Accumulated Context
 
@@ -91,6 +92,10 @@ Phase 5: [▱▱▱▱] 0/4
 | 2026-02-12 | Session-based validation instead of InertiaValidationError | InertiaValidationError does not exist in inertia-django 1.2.0 | All form validation uses session → middleware → useForm pattern |
 | 2026-02-12 | Client-side CSV validation with PapaParse | Validate CSV structure before upload for better UX | Reduces server load and provides immediate feedback |
 | 2026-02-12 | Reusable FormField component pattern | Consistent form field styling and error display | Established pattern for all future forms |
+| 2026-02-12 | Wrapped expensive publisher query in defer() closure | Delay Subquery + in_bulk operations until after initial page shell renders for improved perceived load time | Initial page render is instant with loading spinner |
+| 2026-02-12 | Used only: ['publishers'] for partial reload | Prevent refetching all page props (auth, flash messages) when only publishers list changes | Search requests only fetch/update publishers prop, reducing bandwidth |
+| 2026-02-12 | Implemented 300ms debounce on search input | Reduce server requests while user is still typing | Search requests only fire 300ms after user stops typing |
+| 2026-02-12 | Used preserveState and preserveScroll for table interactions | Maintain table sort order, expanded rows, and scroll position during filtering for better UX | User's table configuration and scroll position remain intact during search |
 
 ### Active Todos
 
@@ -104,7 +109,8 @@ Phase 5: [▱▱▱▱] 0/4
 - [x] Execute Phase 3 Plan 2 (Shared data, layouts, navigation)
 - [x] Plan Phase 4 (Interactive Features)
 - [x] Execute Phase 4 Plan 1 (Form Submissions)
-- [ ] Execute remaining Phase 4 plans
+- [x] Execute Phase 4 Plan 2 (Partial Reloads and Deferred Props)
+- [ ] Plan Phase 5 (Cleanup and Documentation)
 
 ### Known Blockers
 
@@ -128,19 +134,19 @@ None currently.
 
 ### What Just Happened
 
-Phase 4 Plan 1 (Form Submissions with useForm) completed successfully. Implemented create publisher, edit publisher, and bulk CSV upload forms using Inertia useForm hook with Django form validation and session-based error passing. Created reusable FormField and ProgressBar components. Established canonical form submission pattern: Django Forms → session errors → middleware shared data → useForm consumption. Requirement INRT-08 delivered. Duration: 4 minutes for 1 requirement. Phase 4 now 1/3 complete (INRT-08 delivered).
+Phase 4 Plan 2 (Partial Reloads and Deferred Props) completed successfully. Added server-side search filtering with defer() wrapper for expensive publisher queries, implemented debounced search input with partial reloads using only: ['publishers'], preserved table state and scroll position during filtering, and added loading spinner for deferred data. Requirements VIEW-03 and VIEW-04 delivered. Duration: 2 minutes for 2 requirements. Phase 4 now 100% complete (3/3 requirements: INRT-08, VIEW-03, VIEW-04).
 
 ### What's Next
 
-Continue Phase 4 execution. Next plan should focus on remaining Phase 4 requirements (table interactions, admin view migrations, API optimizations).
+Phase 4 complete. Move to Phase 5 (Cleanup and Documentation). This phase should remove debug routes, add production configuration, document the refactor, and validate all requirements are met.
 
 ### Context for Next Session
 
-**If continuing Phase 4:**
-- Goal: Complete interactive features migration (2 requirements remaining)
-- Remaining Phase 4 requirements: Table interactions, admin view optimizations
-- Remaining overall: 6 requirements (2 in Phase 4, 4 in Phase 5)
-- Form submission pattern now established and reusable
+**Moving to Phase 5:**
+- Goal: Complete cleanup and documentation (4 requirements remaining)
+- Remaining overall: 4 requirements (all in Phase 5)
+- Phase 4 established patterns: Form submissions, partial reloads, deferred props
+- All core Inertia functionality now implemented and tested
 
 **Completed phases artifacts to reference:**
 - .planning/phases/01-inertia-infrastructure/01-01-SUMMARY.md (Inertia infrastructure setup)
@@ -148,22 +154,23 @@ Continue Phase 4 execution. Next plan should focus on remaining Phase 4 requirem
 - .planning/phases/03-core-view-migration/03-01-SUMMARY.md (Core view migration)
 - .planning/phases/03-core-view-migration/03-02-SUMMARY.md (Shared data and persistent layouts)
 - .planning/phases/04-interactive-features/04-01-SUMMARY.md (Form submissions with useForm)
+- .planning/phases/04-interactive-features/04-02-SUMMARY.md (Partial reloads and deferred props)
 - scrapegrape/scrapegrape/middleware.py (Shared data middleware with errors prop)
 - scrapegrape/frontend/src/Layouts/AppLayout.tsx (Persistent layout pattern)
 - scrapegrape/frontend/src/components/FormField.tsx (Reusable form field component)
 - scrapegrape/publishers/forms.py (Django Forms pattern)
-- scrapegrape/publishers/views.py (Session-based error flashing pattern)
+- scrapegrape/publishers/views.py (Session-based error flashing pattern, defer() wrapper, search filtering)
 
 ---
 
 ### Last Session
 
 - **Date:** 2026-02-12
-- **Stopped at:** Completed Phase 4 Plan 1 (04-01-PLAN.md) - INRT-08 delivered
-- **Next action:** Execute Phase 4 Plan 2 (if exists) or plan remaining Phase 4 requirements
+- **Stopped at:** Completed Phase 4 Plan 2 (04-02-PLAN.md) - VIEW-03 and VIEW-04 delivered - Phase 4 complete
+- **Next action:** Plan Phase 5 (Cleanup and Documentation)
 
 ---
 
 *State initialized: 2026-02-12*
 *Last updated: 2026-02-12*
-*Ready for: Phase 4 continuation*
+*Ready for: Phase 5 planning*

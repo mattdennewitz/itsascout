@@ -46,7 +46,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] 02-01-PLAN.md -- Move sgui/ to scrapegrape/frontend/, update Django/Vite/Docker paths, verify build pipeline
+- [x] 02-01-PLAN.md -- Move sgui/ to scrapegrape/frontend/, update Django/Vite/Docker paths, verify build pipeline
 
 **Requirements:**
 - CONS-01: React source moved from sgui/ to scrapegrape/frontend/
@@ -135,12 +135,12 @@ Plans:
 | Phase | Status | Requirements | Completion |
 |-------|--------|--------------|------------|
 | 1 - Inertia Infrastructure | Complete (2026-02-12) | 4 | 100% |
-| 2 - Frontend Consolidation | Planned | 4 | 0% |
+| 2 - Frontend Consolidation | Complete (2026-02-12) | 4 | 100% |
 | 3 - Core View Migration | Pending | 5 | 0% |
 | 4 - Interactive Features | Pending | 3 | 0% |
 | 5 - Cleanup & Verification | Pending | 4 | 0% |
 
-**Overall:** 4/20 requirements complete (20%)
+**Overall:** 8/20 requirements complete (40%)
 
 ---
 
@@ -184,4 +184,4 @@ Each phase must complete before the next begins. This ordering minimizes risk by
 ---
 
 *Roadmap created: 2026-02-12*
-*Next: `/gsd:execute-phase 2`*
+*Next: `/gsd:plan-phase 3`*

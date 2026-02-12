@@ -70,6 +70,12 @@ Plans:
 
 **Dependencies:** Phase 2 (consolidated frontend structure required for Pages/ components)
 
+**Plans:** 2 plans
+
+Plans:
+- [ ] 03-01-PLAN.md -- Convert publisher view to inertia_render() and create Publishers/Index page component
+- [ ] 03-02-PLAN.md -- Add shared data middleware, persistent AppLayout, and Inertia Link navigation
+
 **Requirements:**
 - VIEW-01: Publisher table view converted from template-embedded JSON to render_inertia()
 - VIEW-02: Existing DRF serializers reused for Inertia prop serialization
@@ -136,7 +142,7 @@ Plans:
 |-------|--------|--------------|------------|
 | 1 - Inertia Infrastructure | Complete (2026-02-12) | 4 | 100% |
 | 2 - Frontend Consolidation | Complete (2026-02-12) | 4 | 100% |
-| 3 - Core View Migration | Pending | 5 | 0% |
+| 3 - Core View Migration | Planned | 5 | 0% |
 | 4 - Interactive Features | Pending | 3 | 0% |
 | 5 - Cleanup & Verification | Pending | 4 | 0% |
 
@@ -184,4 +190,4 @@ Each phase must complete before the next begins. This ordering minimizes risk by
 ---
 
 *Roadmap created: 2026-02-12*
-*Next: `/gsd:plan-phase 3`*
+*Next: `/gsd:execute-phase 03-core-view-migration`*

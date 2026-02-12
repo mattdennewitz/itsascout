@@ -19,6 +19,7 @@
     "lucide-react": "^0.525.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-papaparse": "^4.4.0",
     "tailwind-merge": "^3.3.1",
     "tailwindcss": "^4.1.11"
   },

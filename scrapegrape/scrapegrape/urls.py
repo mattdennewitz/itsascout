@@ -23,5 +23,8 @@ import publishers.views
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("_debug/inertia/", publishers.views.inertia_smoke_test, name="debug-inertia"),
+    path("publishers/create", publishers.views.create, name="publisher-create"),
+    path("publishers/<int:publisher_id>/edit", publishers.views.update, name="publisher-update"),
+    path("publishers/bulk-upload", publishers.views.bulk_upload, name="publisher-bulk-upload"),
     path("", publishers.views.table, name="table"),
 ]

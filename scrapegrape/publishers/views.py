@@ -1,9 +1,20 @@
+import csv
 from django.db.models import Subquery, OuterRef
+from django.shortcuts import redirect, get_object_or_404
 from inertia import render as inertia_render
 
 from ingestion.models import TermsDiscoveryResult, TermsEvaluationResult
 from publishers.models import Publisher, WAFReport
 from publishers.serializers import PublisherWithReportsSerializer
+from publishers.forms import PublisherForm, BulkUploadForm
+from publishers.tasks import analyze_url
+
+
+def _flash_errors(request, form):
+    """Flatten Django form errors to {field: first_message} and store in session for Inertia useForm."""
+    request.session['errors'] = {
+        field: messages[0] for field, messages in form.errors.items()
+    }
 
 
 def table(request):
@@ -72,3 +83,71 @@ def inertia_smoke_test(request):
         'message': 'Inertia is working!',
         'timestamp': '2026-02-12',
     })
+
+
+def create(request):
+    """Create a new publisher with form validation."""
+    if request.method == 'POST':
+        form = PublisherForm(request.POST)
+        if form.is_valid():
+            publisher = form.save()
+            # Enqueue background analysis task
+            analyze_url.enqueue(publisher.url)
+            request.session['success'] = f'Publisher "{publisher.name}" created and analysis queued!'
+            return redirect('/')
+        else:
+            _flash_errors(request, form)
+            return redirect('/publishers/create')
+
+    # GET request
+    return inertia_render(request, 'Publishers/Create')
+
+
+def update(request, publisher_id):
+    """Update an existing publisher with form validation."""
+    publisher = get_object_or_404(Publisher, id=publisher_id)
+
+    if request.method == 'POST':
+        form = PublisherForm(request.POST, instance=publisher)
+        if form.is_valid():
+            form.save()
+            request.session['success'] = f'Publisher "{publisher.name}" updated successfully!'
+            return redirect('/')
+        else:
+            _flash_errors(request, form)
+            return redirect(f'/publishers/{publisher_id}/edit')
+
+    # GET request
+    return inertia_render(request, 'Publishers/Edit', props={
+        'publisher': {
+            'id': publisher.id,
+            'name': publisher.name,
+            'url': publisher.url
+        }
+    })
+
+
+def bulk_upload(request):
+    """Bulk upload publishers from CSV file."""
+    if request.method == 'POST':
+        form = BulkUploadForm(request.POST, request.FILES)
+        if form.is_valid():
+            csv_file = request.FILES['csv_file']
+            # Decode and parse CSV
+            decoded_file = csv_file.read().decode('utf-8')
+            reader = csv.DictReader(decoded_file.splitlines())
+
+            count = 0
+            for row in reader:
+                if 'URL' in row and row['URL']:
+                    analyze_url.enqueue(row['URL'])
+                    count += 1
+
+            request.session['success'] = f'{count} URLs queued for analysis'
+            return redirect('/')
+        else:
+            _flash_errors(request, form)
+            return redirect('/publishers/bulk-upload')
+
+    # GET request
+    return inertia_render(request, 'Publishers/BulkUpload')

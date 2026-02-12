@@ -19,6 +19,9 @@ def inertia_share(get_response):
                 'error': request.session.pop('error', None),
                 'info': request.session.pop('info', None),
             },
+
+            # Validation errors -- auto-clear from session on read, consumed by useForm
+            errors=lambda: request.session.pop('errors', {}),
         )
         return get_response(request)
     return middleware

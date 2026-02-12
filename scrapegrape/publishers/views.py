@@ -1,7 +1,7 @@
 import csv
 from django.db.models import Subquery, OuterRef
 from django.shortcuts import redirect, get_object_or_404
-from inertia import render as inertia_render
+from inertia import render as inertia_render, defer
 
 from ingestion.models import TermsDiscoveryResult, TermsEvaluationResult
 from publishers.models import Publisher, WAFReport
@@ -18,59 +18,67 @@ def _flash_errors(request, form):
 
 
 def table(request):
-    # Subqueries to get the latest related object IDs
-    latest_waf = Subquery(
-        WAFReport.objects.filter(publisher=OuterRef("pk"))
-        .order_by("-created_at")
-        .values("id")[:1]
-    )
-    latest_discovery = Subquery(
-        TermsDiscoveryResult.objects.filter(publisher=OuterRef("pk"))
-        .order_by("-created_at")
-        .values("id")[:1]
-    )
-    latest_evaluation = Subquery(
-        TermsEvaluationResult.objects.filter(publisher=OuterRef("pk"))
-        .order_by("-created_at")
-        .values("id")[:1]
-    )
+    search = request.GET.get('search', '')
 
-    # Annotate publishers with those latest IDs
-    publishers = Publisher.objects.annotate(
-        latest_waf_id=latest_waf,
-        latest_discovery_id=latest_discovery,
-        latest_evaluation_id=latest_evaluation,
-    )
-
-    # Get all needed related objects in bulk
-    waf_reports = WAFReport.objects.in_bulk(
-        publishers.values_list("latest_waf_id", flat=True)
-    )
-    discovery_results = TermsDiscoveryResult.objects.in_bulk(
-        publishers.values_list("latest_discovery_id", flat=True)
-    )
-    evaluation_results = TermsEvaluationResult.objects.in_bulk(
-        publishers.values_list("latest_evaluation_id", flat=True)
-    )
-
-    # Build final result
-    result = []
-    for publisher in publishers:
-        result.append(
-            {
-                "publisher": publisher,
-                "waf_report": waf_reports.get(publisher.latest_waf_id),
-                "terms_discovery": discovery_results.get(publisher.latest_discovery_id),
-                "terms_evaluation": evaluation_results.get(
-                    publisher.latest_evaluation_id
-                ),
-            }
+    def load_publishers():
+        # Subqueries to get the latest related object IDs
+        latest_waf = Subquery(
+            WAFReport.objects.filter(publisher=OuterRef("pk"))
+            .order_by("-created_at")
+            .values("id")[:1]
+        )
+        latest_discovery = Subquery(
+            TermsDiscoveryResult.objects.filter(publisher=OuterRef("pk"))
+            .order_by("-created_at")
+            .values("id")[:1]
+        )
+        latest_evaluation = Subquery(
+            TermsEvaluationResult.objects.filter(publisher=OuterRef("pk"))
+            .order_by("-created_at")
+            .values("id")[:1]
         )
 
-    serialized = PublisherWithReportsSerializer(result, many=True)
+        # Annotate publishers with those latest IDs
+        publishers = Publisher.objects.annotate(
+            latest_waf_id=latest_waf,
+            latest_discovery_id=latest_discovery,
+            latest_evaluation_id=latest_evaluation,
+        )
+
+        # Apply search filter if search param exists
+        if search:
+            publishers = publishers.filter(name__icontains=search)
+
+        # Get all needed related objects in bulk
+        waf_reports = WAFReport.objects.in_bulk(
+            publishers.values_list("latest_waf_id", flat=True)
+        )
+        discovery_results = TermsDiscoveryResult.objects.in_bulk(
+            publishers.values_list("latest_discovery_id", flat=True)
+        )
+        evaluation_results = TermsEvaluationResult.objects.in_bulk(
+            publishers.values_list("latest_evaluation_id", flat=True)
+        )
+
+        # Build final result
+        result = []
+        for publisher in publishers:
+            result.append(
+                {
+                    "publisher": publisher,
+                    "waf_report": waf_reports.get(publisher.latest_waf_id),
+                    "terms_discovery": discovery_results.get(publisher.latest_discovery_id),
+                    "terms_evaluation": evaluation_results.get(
+                        publisher.latest_evaluation_id
+                    ),
+                }
+            )
+
+        serialized = PublisherWithReportsSerializer(result, many=True)
+        return serialized.data
 
     return inertia_render(request, 'Publishers/Index', props={
-        'publishers': serialized.data
+        'publishers': defer(load_publishers),
     })
 
 

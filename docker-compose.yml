@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: scrapegrape
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  django:
+    build: .
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    env_file: scrapegrape/.env
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/scrapegrape
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: uv run scrapegrape/manage.py runserver 0.0.0.0:8000
+
+  vite:
+    image: node:24-slim
+    working_dir: /app
+    volumes:
+      - ./scrapegrape/frontend:/app
+      - vite_node_modules:/app/node_modules
+    ports:
+      - "5173:5173"
+    command: sh -c "npm install && npm run dev"
+
+volumes:
+  postgres_data:
+  vite_node_modules:

@@ -1,6 +1,6 @@
 "use client"
 
-import { createColumnHelper } from "@tanstack/react-table"
+import { createColumnHelper, type ColumnDef } from "@tanstack/react-table"
 
 type ActivityPermission = {
   notes: string;
@@ -39,7 +39,7 @@ export type Publisher = {
 
 const columnHelper = createColumnHelper<Publisher>()
 
-export const columns = [
+export const columns: ColumnDef<Publisher, any>[] = [
   columnHelper.display({
     id: "expander",
     header: "",

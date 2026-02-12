@@ -123,7 +123,11 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
+
+STATICFILES_DIRS = [
+    BASE_DIR / "frontend" / "dist",
+]
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -136,7 +140,7 @@ TASKS = {"default": {"BACKEND": "django_tasks.backends.database.DatabaseBackend"
 DJANGO_VITE = {
     "default": {
         "dev_mode": DEBUG,
-        "manifest_path": BASE_DIR.parent / "sgui" / "dist" / "manifest.json",
+        "manifest_path": BASE_DIR / "frontend" / "dist" / "manifest.json",
     }
 }
 

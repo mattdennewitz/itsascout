@@ -60,6 +60,7 @@ MIDDLEWARE = [
     "inertia.middleware.InertiaMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "scrapegrape.middleware.inertia_share",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 

@@ -21,16 +21,16 @@
 
 ## Current Position
 
-**Phase:** Phase 1 - Inertia Infrastructure
-**Plan:** 01-01 (completed)
-**Status:** Phase 1 Plan 1 complete - ready for next phase
+**Phase:** Phase 2 - Frontend Consolidation
+**Plan:** 02-01 (completed)
+**Status:** Phase 2 Plan 1 complete - ready for Phase 3
 
 **Progress Bar:**
 ```
-[▓▓▱▱▱▱▱▱▱▱] 4/20 requirements (20%)
+[▓▓▓▓▱▱▱▱▱▱] 8/20 requirements (40%)
 
 Phase 1: [▓▓▓▓] 4/4 (complete)
-Phase 2: [▱▱▱▱] 0/4
+Phase 2: [▓▓▓▓] 4/4 (complete)
 Phase 3: [▱▱▱▱▱] 0/5
 Phase 4: [▱▱▱] 0/3
 Phase 5: [▱▱▱▱] 0/4
@@ -42,9 +42,9 @@ Phase 5: [▱▱▱▱] 0/4
 
 ### Velocity
 
-- **Requirements completed:** 4 (INRT-01, INRT-02, INRT-03, INRT-04)
-- **Average time per requirement:** 8.25 min (33 min / 4 requirements)
-- **Estimated remaining:** 16 requirements (projected: ~132 minutes)
+- **Requirements completed:** 8 (INRT-01 to INRT-04, CONS-01 to CONS-04)
+- **Average time per requirement:** 4.25 min (34 min / 8 requirements)
+- **Estimated remaining:** 12 requirements (projected: ~51 minutes)
 
 ### Quality
 
@@ -55,15 +55,16 @@ Phase 5: [▱▱▱▱] 0/4
 ### Milestone
 
 - **Started:** 2026-02-12
-- **Target completion:** 2026-02-12 (estimated based on 8.25 min/requirement × 16 remaining = ~2.2 hours)
+- **Target completion:** 2026-02-12 (estimated based on 4.25 min/requirement × 12 remaining = ~51 minutes)
 - **Days elapsed:** 0
-- **Phases completed:** 1/5 (20%)
+- **Phases completed:** 2/5 (40%)
 
 ### Plan Execution History
 
 | Phase | Plan | Duration | Tasks | Files | Requirements | Completed |
 |-------|------|----------|-------|-------|--------------|-----------|
 | 01    | 01   | 33 min   | 3     | 10    | 4 (INRT-01 to INRT-04) | 2026-02-12 |
+| 02    | 01   | 1 min    | 3     | 30+   | 4 (CONS-01 to CONS-04) | 2026-02-12 |
 
 ---
 
@@ -79,14 +80,18 @@ Phase 5: [▱▱▱▱] 0/4
 | 2026-02-12 | Dual-path entry point for gradual migration | Preserves existing table view while enabling Inertia routes | Enables Phase 1 validation without breaking functionality |
 | 2026-02-12 | Cookie-based CSRF via Axios defaults (not meta tag) | Avoids anti-pattern identified in research; cleaner integration | All future POST requests automatically include CSRF token |
 | 2026-02-12 | Eager page loading for import.meta.glob | Better tree-shaking and build-time error detection | Improved DX and build validation |
+| 2026-02-12 | Dual directory convention for Inertia (PascalCase) and existing code (lowercase) | Prevents naming conflicts, maintains clarity between new Inertia components and existing shadcn/TanStack code | Clear separation for Phase 3+ migration |
+| 2026-02-12 | Added STATICFILES_DIRS to Django settings | Required for collectstatic to find Vite-built assets in production deployment | Production static file serving |
 
 ### Active Todos
 
 - [x] Run `/gsd:plan-phase 1` to create infrastructure setup plan
 - [x] Execute Phase 1 Plan 1 (Inertia Infrastructure)
 - [x] Validate Django 5.2 and React 19.1 compatibility with Inertia
-- [ ] Plan Phase 2 (Frontend Consolidation)
-- [ ] Review consolidated frontend structure needs
+- [x] Plan Phase 2 (Frontend Consolidation)
+- [x] Execute Phase 2 Plan 1 (Frontend Consolidation)
+- [ ] Plan Phase 3 (View Migration)
+- [ ] Review publisher table view migration approach
 
 ### Known Blockers
 
@@ -110,36 +115,37 @@ None currently.
 
 ### What Just Happened
 
-Phase 1 Plan 1 (Inertia Infrastructure) completed successfully. Installed inertia-django and @inertiajs/react, configured Django middleware and settings, created dual-path entry point preserving existing functionality, and validated with smoke test at /_debug/inertia/. All 4 Phase 1 requirements (INRT-01 through INRT-04) delivered. Django 5.2 and React 19.1 compatibility confirmed. Duration: 33 minutes for 4 requirements.
+Phase 2 Plan 1 (Frontend Consolidation) completed successfully. Moved React frontend from sgui/ to scrapegrape/frontend/, updated Django settings (manifest_path, STATICFILES_DIRS, STATIC_URL), updated Docker Compose volume mounts, established Inertia directory structure (Pages/, Components/, Layouts/), and verified dev HMR and production build pipeline. All 4 Phase 2 requirements (CONS-01 through CONS-04) delivered. Duration: 1 minute for 4 requirements.
 
 ### What's Next
 
-Begin Phase 2 (Frontend Consolidation) via `/gsd:plan-phase 2`. Phase 2 moves React source from sgui/ to scrapegrape/frontend/, updates Vite config and django-vite settings, establishes Pages/Components/Layouts directory structure, and validates build pipeline. Critical success factor: ensure Django admin remains accessible and static files serve correctly in both dev and production modes.
+Begin Phase 3 (View Migration) via `/gsd:plan-phase 3`. Phase 3 converts the publisher list view from JSON-in-template to Inertia, migrating the existing TanStack table to an Inertia page component. Critical success factor: preserve exact functionality while switching rendering architecture—no feature changes, only architectural refactor.
 
 ### Context for Next Session
 
-**If starting Phase 2 planning:**
-- Phase 2 goal: Frontend source moved from sgui/ to scrapegrape/frontend/ with working build pipeline
-- Phase 2 requirements: CONS-01 through CONS-04
-- Phase 2 success criteria: 4 observable behaviors (production build completes, HMR works, admin accessible, static files serve correctly)
-- Phase 1 infrastructure now available: Inertia middleware, CSRF configured, dual-path entry point, smoke test component pattern
+**If starting Phase 3 planning:**
+- Phase 3 goal: Migrate publisher list view from JSON-in-template to Inertia rendering
+- Phase 3 requirements: VIEW-01 through VIEW-05
+- Phase 3 success criteria: Publisher table renders identically via Inertia, maintains all functionality
+- Phase 2 artifacts now available: Consolidated frontend in scrapegrape/frontend/, Inertia directory structure, verified build pipeline
 
-**Phase 1 artifacts to reference:**
-- .planning/phases/01-inertia-infrastructure/01-01-SUMMARY.md (completed execution summary)
-- scrapegrape/scrapegrape/settings.py (Inertia middleware and settings)
-- sgui/src/main.tsx (dual-path entry point pattern)
-- sgui/src/Pages/Debug/InertiaTest.tsx (page component example)
+**Completed phases artifacts to reference:**
+- .planning/phases/01-inertia-infrastructure/01-01-SUMMARY.md (Inertia infrastructure setup)
+- .planning/phases/02-frontend-consolidation/02-01-SUMMARY.md (Frontend consolidation)
+- scrapegrape/frontend/src/main.tsx (dual-path entry point pattern)
+- scrapegrape/frontend/src/Pages/Debug/InertiaTest.tsx (Inertia page component example)
+- scrapegrape/frontend/src/datatable/ (existing TanStack table implementation to migrate)
 
 ---
 
 ### Last Session
 
 - **Date:** 2026-02-12
-- **Stopped at:** Completed Phase 1 Plan 1 (01-01-PLAN.md)
-- **Next action:** Plan Phase 2 via `/gsd:plan-phase 2`
+- **Stopped at:** Completed Phase 2 Plan 1 (02-01-PLAN.md)
+- **Next action:** Plan Phase 3 via `/gsd:plan-phase 3`
 
 ---
 
 *State initialized: 2026-02-12*
 *Last updated: 2026-02-12*
-*Ready for: Phase 2 planning*
+*Ready for: Phase 3 planning*

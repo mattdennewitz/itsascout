@@ -1,0 +1,22 @@
+{% load django_vite %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Scrapegrape{% endblock %}</title>
+
+    {% vite_hmr_client %}
+    {% vite_react_refresh %}
+    {% vite_asset 'src/main.tsx' %}
+
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    {% block inertia %}{% endblock %}
+
+    <div id="root"></div>
+
+    {% block extra_body %}{% endblock %}
+</body>
+</html>

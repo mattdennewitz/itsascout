@@ -1,830 +1,399 @@
-# Domain Pitfalls: Django + Inertia.js Migration and Project Consolidation
+# Pitfalls Research
 
-**Domain:** Refactoring Django+React app from template-rendered JSON to Inertia.js with monorepo consolidation
-**Researched:** 2026-02-12
-**Confidence:** MEDIUM (verified with official docs and community issues, some LOW confidence areas flagged)
-
----
+**Domain:** Adding URL analysis workflow (SSE streaming, RQ task pipeline, curl-cffi fetching, metadata extraction) to existing Django 5.2 + Inertia.js + React 19 app
+**Researched:** 2026-02-13
+**Confidence:** MEDIUM (verified across official docs, GitHub issues, and community sources; some curl-cffi specifics are LOW confidence)
 
 ## Critical Pitfalls
 
-Mistakes that cause rewrites, major bugs, or production incidents.
+### Pitfall 1: InertiaMiddleware Interfering with SSE StreamingHttpResponse
 
-### Pitfall 1: CSRF Token Header Mismatch
-**What goes wrong:** Django's default CSRF header names don't match Axios (Inertia's HTTP library), causing all POST/PUT/DELETE requests to fail with 403 Forbidden errors.
+**What goes wrong:**
+SSE endpoints return `StreamingHttpResponse`, but the Inertia middleware runs on every request. While the current `InertiaMiddleware` checks for `X-Inertia` header and passes through non-Inertia requests, the custom `inertia_share` middleware in `scrapegrape/middleware.py` calls `share()` on every request -- including SSE endpoints. This attaches session-backed lazy props (auth, flash, errors) to SSE requests that never use them, causing unnecessary session reads and potential `session.pop()` side effects on SSE polling.
 
-**Why it happens:** Django expects `X-CSRFToken` header, but Axios sends `X-XSRF-TOKEN` by default. The default configuration leaves this misconfigured.
+**Why it happens:**
+The Inertia middleware stack was designed assuming all routes are Inertia page requests. SSE endpoints are a fundamentally different response type (long-lived, streaming) that the middleware was never designed to handle. The `InertiaMiddleware` itself is safe (it checks `X-Inertia` header), but custom share middleware and Django's own `CommonMiddleware`, `SessionMiddleware`, and especially `GZipMiddleware` can all interfere.
 
-**Consequences:**
-- All form submissions fail silently or with cryptic CSRF errors
-- Authentication flows break
-- Data mutations impossible without manual workarounds
-- Production deployment fails on first user interaction
-
-**Prevention:**
+**How to avoid:**
+1. SSE views must return `StreamingHttpResponse` with `Content-Type: text/event-stream`. The Inertia middleware will pass these through because the browser does not send `X-Inertia` headers on `EventSource` requests.
+2. Modify `inertia_share` middleware to skip SSE routes:
 ```python
-# settings.py - Option 1: Change Django to match Axios
-CSRF_HEADER_NAME = 'HTTP_X_XSRF_TOKEN'
-CSRF_COOKIE_NAME = 'XSRF-TOKEN'
+def inertia_share(get_response):
+    def middleware(request):
+        # Skip Inertia sharing for SSE/API endpoints
+        if request.path.startswith('/api/') or request.path.startswith('/sse/'):
+            return get_response(request)
+        share(request, auth=lambda: {...}, flash=lambda: {...}, errors=lambda: {...})
+        return get_response(request)
+    return middleware
 ```
+3. Do NOT add `GZipMiddleware` -- Django ticket #36655 confirms it buffers entire streaming responses, completely breaking SSE. If already present, exclude streaming responses.
+4. Set `Cache-Control: no-cache` and `X-Accel-Buffering: no` headers on SSE responses to prevent nginx proxy buffering.
 
-OR
+**Warning signs:**
+- SSE events arrive in batches instead of one-at-a-time
+- SSE connection succeeds but no events appear until connection closes
+- Session data (flash messages) disappearing unexpectedly after SSE connections
+- Browser DevTools EventStream tab shows nothing, then dumps everything at once
 
-```javascript
-// app.jsx - Option 2: Configure Axios to match Django
-axios.defaults.xsrfHeaderName = "X-CSRFToken";
-axios.defaults.xsrfCookieName = "csrftoken";
-```
-
-**Detection:**
-- Browser console shows 403 errors on POST requests
-- Django logs: "CSRF verification failed. Request aborted."
-- Network tab shows missing or incorrect CSRF headers
-
-**Phase:** Phase 1 (Inertia Setup) - Must be configured before any Inertia views work
-
-**Sources:**
-- [Inertia.js CSRF Protection](https://inertiajs.com/csrf-protection)
-- [django-inertia Issue #8](https://github.com/inertiajs/inertia-django/issues/8)
-- [django-inertia Issue #14](https://github.com/inertiajs/inertia-django/issues/14)
+**Phase to address:**
+Infrastructure phase (when adding SSE endpoint). Must be the first SSE integration test: verify a single event streams immediately to the browser.
 
 ---
 
-### Pitfall 2: Axios Version Conflicts
-**What goes wrong:** Installing `@inertiajs/react` brings its own Axios version that conflicts with project's existing Axios, causing CSRF tokens to not be sent or version incompatibility errors.
+### Pitfall 2: WSGI Worker Exhaustion from Long-Lived SSE Connections
 
-**Why it happens:** Inertia bundles Axios as a dependency, and npm/yarn may install multiple versions causing the wrong instance to handle requests.
+**What goes wrong:**
+Each SSE connection holds a WSGI worker process for its entire lifetime. The current setup uses `WSGI_APPLICATION = "scrapegrape.wsgi.application"` with Django's dev server (and presumably gunicorn in production). With even 3-5 concurrent URL analyses, all gunicorn workers are occupied by SSE connections, and the entire app becomes unresponsive -- no pages load, no API calls succeed.
 
-**Consequences:**
-- CSRF tokens not attached to requests despite correct configuration
-- Inconsistent behavior between dev and production
-- Middleware not recognizing Inertia requests (missing `X-Inertia` header)
+**Why it happens:**
+WSGI was designed for short-lived request/response cycles. SSE connections are long-lived (30 seconds to several minutes for a full analysis pipeline). A typical gunicorn deployment has 2-4 workers per CPU core. Each SSE connection permanently occupies one worker until the analysis completes or the client disconnects.
 
-**Prevention:**
-```json
-// package.json - Force single Axios version
-{
-  "resolutions": {
-    "axios": "^1.6.0"
-  },
-  "dependencies": {
-    "@inertiajs/react": "^1.0.0",
-    "axios": "^1.6.0"
-  }
+**How to avoid:**
+1. Use a dedicated SSE approach that does not hold WSGI workers:
+   - **Option A (Recommended):** Use Django's async view support with `StreamingHttpResponse` and an `async def` view, served via an ASGI server (uvicorn/daphne) for SSE routes only. The rest of the app stays WSGI.
+   - **Option B:** Use a separate lightweight SSE service (e.g., a small FastAPI/Starlette app) that reads progress from Redis and streams to clients. Django RQ workers write progress to Redis; the SSE service reads and streams it.
+   - **Option C:** Use polling instead of SSE. Client polls a `/api/job/<id>/status` endpoint every 2 seconds. Simpler but worse UX.
+2. If using gunicorn with SSE, switch to `--worker-class gthread` with `--threads 4-8` so each worker handles multiple connections. But this still has limits.
+3. Set aggressive SSE timeouts -- close the connection after the analysis completes (do not keep it open indefinitely).
+4. gunicorn `--timeout` must be higher than the maximum analysis duration, or workers will be killed mid-stream. Default 30 seconds will kill most analyses.
+
+**Warning signs:**
+- App becomes unresponsive when multiple analyses run simultaneously
+- gunicorn logs: `[CRITICAL] WORKER TIMEOUT`
+- SSE connections terminate prematurely with no error
+- CPU/memory usage stays low but requests queue up
+
+**Phase to address:**
+Infrastructure phase. This is an architectural decision that must be made before implementing SSE. Changing from WSGI to ASGI or adding a polling fallback after SSE is built is a significant rework.
+
+---
+
+### Pitfall 3: RQ Dependent Jobs Silently Abandoned on Parent Failure
+
+**What goes wrong:**
+The URL analysis pipeline is a chain: URL normalization -> robots.txt check -> page fetch -> metadata extraction -> LLM publisher resolution. If an early job fails (e.g., robots.txt fetch times out), dependent jobs are never enqueued by default. The SSE stream shows the pipeline "stuck" at a step forever -- no error, no completion, no progress update.
+
+**Why it happens:**
+RQ's default behavior is to only enqueue dependent jobs when the parent succeeds. Jobs that fail are moved to `FailedJobRegistry`, and dependents stay in `DeferredJobRegistry` forever. There is a `Dependency(allow_failure=True)` option, but it has a known bug (GitHub issue #2006): jobs moved to `FailedJobRegistry` due to `AbandonedJobError` (worker crash, OOM) never trigger dependent enqueueing even with `allow_failure=True`.
+
+**How to avoid:**
+1. Use `on_failure` callbacks on every job in the chain to update progress state in Redis:
+```python
+from rq import Callback
+
+queue.enqueue(
+    fetch_page,
+    depends_on=Dependency(jobs=[robots_job], allow_failure=True),
+    on_failure=Callback(handle_step_failure),
+    on_success=Callback(handle_step_success),
+)
+
+def handle_step_failure(job, connection, type, value, traceback):
+    # Update Redis progress key so SSE stream can report the failure
+    redis_conn.hset(f"analysis:{job.meta['analysis_id']}", 'status', 'failed')
+    redis_conn.hset(f"analysis:{job.meta['analysis_id']}", 'error', str(value))
+    redis_conn.hset(f"analysis:{job.meta['analysis_id']}", 'failed_step', job.func_name)
+```
+2. Implement a "pipeline supervisor" pattern: a single parent job that orchestrates steps sequentially rather than chaining via `depends_on`. This gives you explicit error handling at each step:
+```python
+@job
+def run_analysis_pipeline(url, analysis_id):
+    update_progress(analysis_id, 'normalizing', 0)
+    normalized = normalize_url(url)
+
+    update_progress(analysis_id, 'checking_robots', 20)
+    try:
+        robots_ok = check_robots(normalized)
+    except Exception as e:
+        update_progress(analysis_id, 'robots_failed', 20, error=str(e))
+        # Continue anyway or abort based on policy
+
+    update_progress(analysis_id, 'fetching', 40)
+    html = fetch_page(normalized)
+    # ... etc
+```
+3. Set `job_timeout` on every job. Default RQ timeout is 180 seconds, but some steps (LLM calls, Zyte fetches) may need more. Without explicit timeouts, a stuck job holds the worker indefinitely.
+4. Monitor `FailedJobRegistry` and `DeferredJobRegistry` sizes. Orphaned deferred jobs indicate broken chains.
+
+**Warning signs:**
+- Progress bar gets stuck at a specific percentage and never moves
+- Redis `DeferredJobRegistry` grows over time
+- `FailedJobRegistry` has jobs but no corresponding error shown to user
+- Analysis jobs "complete" but some steps show no results
+
+**Phase to address:**
+Task pipeline phase. The decision between dependency chaining vs. supervisor pattern is architectural and must happen before implementing individual pipeline steps.
+
+---
+
+### Pitfall 4: curl-cffi Session Crashes Python Process When Closing Streaming Connections
+
+**What goes wrong:**
+curl-cffi has a documented bug (GitHub issue #675) where closing a `Session` or `Response` during an incomplete streaming request causes a segfault -- the Python process crashes without a Python exception. If curl-cffi is used to fetch pages that respond slowly or use chunked transfer encoding, and you implement a timeout that cancels the request, the entire RQ worker process dies.
+
+**Why it happens:**
+When `stream=True` is used and the response is not fully consumed before `close()` is called, curl-cffi's underlying C library (curl-impersonate) has a cleanup race condition. The Python interpreter exits abruptly (segfault from curl handle cleanup). Setting `keep_alive=False` reduces but does not eliminate the crash.
+
+**How to avoid:**
+1. Never use `stream=True` with curl-cffi for page fetching. Always consume the full response:
+```python
+from curl_cffi.requests import Session
+
+with Session(impersonate="chrome") as s:
+    response = s.get(url, timeout=30)  # NOT stream=True
+    html = response.text
+```
+2. Always use curl-cffi `Session` as a context manager (`with Session() as s:`) to ensure proper cleanup.
+3. Set explicit `timeout` on every request. curl-cffi's stream mode timeout has documented issues where timeout has no effect during streaming.
+4. If you need to abort a long-running fetch, do it via `signal.alarm()` or RQ's `job_timeout` rather than trying to close the curl-cffi session mid-stream.
+5. For the Zyte fallback path, continue using `requests` (as the existing `fetch_html_via_proxy` does) -- do not switch Zyte calls to curl-cffi.
+
+**Warning signs:**
+- RQ worker processes disappearing with no Python traceback
+- `Segmentation fault` in Docker logs
+- Workers constantly restarting
+- Jobs marked as `lost` in RQ dashboard
+
+**Phase to address:**
+Page fetching phase. Must be validated early with a smoke test against slow/chunked-response sites before building the full pipeline on top of curl-cffi.
+
+---
+
+### Pitfall 5: URL Normalization Creating Duplicate Publishers
+
+**What goes wrong:**
+The existing `normalize_url()` in `tasks.py` strips to `scheme://netloc`, but URLs arrive in many forms: `https://www.nytimes.com`, `https://nytimes.com`, `https://NYTimes.com`, `https://www.nytimes.com/`, `http://nytimes.com`. Each creates a different `Publisher` record because `Publisher.objects.get_or_create(url=base_url)` does exact string matching. Over time, the database fills with duplicate publishers that should be the same entity.
+
+**Why it happens:**
+The current normalization is minimal: `f"{parsed_url.scheme}://{parsed_url.netloc}"`. It does not:
+- Lowercase the hostname (`NYTimes.com` vs `nytimes.com`)
+- Strip `www.` prefix consistently (name extraction does this, but URL storage does not)
+- Normalize scheme (`http` vs `https`)
+- Handle trailing slashes
+- Handle IDN/punycode domains (`xn--...`)
+- Handle port numbers (`:80` for HTTP, `:443` for HTTPS are default and should be stripped)
+
+**How to avoid:**
+1. Implement a proper normalization function:
+```python
+from urllib.parse import urlparse
+
+def normalize_publisher_url(url: str) -> str:
+    """Canonical publisher URL for deduplication."""
+    parsed = urlparse(url.strip())
+
+    # Default to https
+    scheme = 'https'
+
+    # Lowercase and strip www
+    hostname = parsed.hostname.lower() if parsed.hostname else ''
+    if hostname.startswith('www.'):
+        hostname = hostname[4:]
+
+    # Strip default ports
+    port = parsed.port
+    if port in (80, 443, None):
+        port_str = ''
+    else:
+        port_str = f':{port}'
+
+    return f'{scheme}://{hostname}{port_str}'
+```
+2. Add a database unique constraint or index on the normalized URL.
+3. Migrate existing publisher URLs to normalized form before deploying the new pipeline.
+4. Use the `url-normalize` library for comprehensive edge case handling (IDN, unicode NFC normalization, dot-segment removal) if you encounter international domains.
+
+**Warning signs:**
+- Publisher count grows faster than expected
+- Same publisher name appears multiple times in the table
+- WAF reports and terms results split across duplicate publisher records
+- LLM publisher resolution returns different names for what should be the same publisher
+
+**Phase to address:**
+URL normalization phase (must be one of the first steps). This is a data model concern that affects everything downstream. Retroactive deduplication is painful.
+
+---
+
+### Pitfall 6: SSE Connection Not Cleaned Up on React Component Unmount
+
+**What goes wrong:**
+User starts a URL analysis, sees the progress stream, then navigates away (Inertia client-side navigation). The `EventSource` connection stays open because the component unmounted without closing it. The server-side SSE view keeps the WSGI/ASGI worker occupied, streaming events into the void. With Inertia's client-side navigation, this happens on every page change -- users accumulate zombie SSE connections.
+
+**Why it happens:**
+Inertia's `router.visit()` unmounts the current page component and mounts the new one. If the `EventSource` is created in a `useEffect` without a cleanup function, or if the cleanup function has a stale closure over the `EventSource` ref, the connection is never closed. Using `useState` to store the `EventSource` instance instead of `useRef` causes re-renders that can create duplicate connections.
+
+**How to avoid:**
+```typescript
+function AnalysisProgress({ analysisId }: { analysisId: string }) {
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const es = new EventSource(`/sse/analysis/${analysisId}/`);
+    eventSourceRef.current = es;
+
+    es.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      // update state...
+    };
+
+    es.addEventListener('complete', () => {
+      es.close(); // Close when pipeline finishes
+      eventSourceRef.current = null;
+    });
+
+    es.onerror = () => {
+      // Only reconnect if not intentionally closed
+      if (es.readyState === EventSource.CLOSED) {
+        reconnectTimeoutRef.current = setTimeout(() => {
+          // reconnect logic with backoff
+        }, 3000);
+      }
+    };
+
+    // CRITICAL: cleanup on unmount
+    return () => {
+      es.close();
+      eventSourceRef.current = null;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+    };
+  }, [analysisId]); // Only re-run if analysisId changes
 }
 ```
+Key rules:
+1. Store `EventSource` in `useRef`, not `useState`.
+2. Always return a cleanup function from `useEffect` that calls `es.close()`.
+3. Clear any reconnection timeouts in the cleanup function.
+4. Send a `complete` event type from the server when the pipeline finishes so the client closes proactively.
+5. Do not put the `EventSource` creation in a function that's called on user interaction without tracking and closing previous connections.
 
-Then run `npm install` or `yarn install` to dedupe.
+**Warning signs:**
+- Server-side worker count climbs over time even when users are idle
+- Multiple SSE connections visible in browser DevTools Network tab for the same analysis
+- Memory usage on the server grows steadily
+- "Max connections" errors in Redis or gunicorn
 
-**Detection:**
-- `npm ls axios` shows multiple versions
-- CSRF errors despite correct header configuration
-- `X-Inertia` header missing from requests
-
-**Phase:** Phase 1 (Inertia Setup) - Check during initial installation
-
-**Sources:**
-- [django-inertia Issue #14 Comments](https://github.com/inertiajs/inertia-django/issues/14)
-- MEDIUM confidence (community-reported issue, not official docs)
-
----
-
-### Pitfall 3: Django Admin Routes Breaking After Consolidation
-**What goes wrong:** Moving from separate `sgui/` frontend to `scrapegrape/frontend/` and changing URL routing causes Django admin at `/admin/` to stop rendering correctly or serve React app instead.
-
-**Why it happens:**
-- Catch-all Inertia routes override admin routes if placed incorrectly in `urls.py`
-- Static file paths change, breaking admin CSS/JS
-- Middleware applies Inertia logic to admin routes
-
-**Consequences:**
-- `/admin/` returns React root div instead of Django admin
-- Admin loads but has no styling (CSS 404s)
-- Attempting to login redirects to React app
-
-**Prevention:**
-```python
-# urls.py - Admin MUST come before catch-all Inertia routes
-urlpatterns = [
-    path('admin/', admin.site.urls),  # FIRST
-    # Other specific routes
-    path('api/', include('publishers.api_urls')),
-    # Inertia catch-all LAST
-    path('<path:path>', inertia_view, name='inertia_catchall'),
-    path('', inertia_view, name='home'),
-]
-```
-
-```python
-# middleware.py - Exclude admin from InertiaMiddleware
-class ConditionalInertiaMiddleware:
-    def __init__(self, get_response):
-        self.get_response = get_response
-
-    def __call__(self, request):
-        if request.path.startswith('/admin/'):
-            return self.get_response(request)
-        # Apply Inertia logic
-        return InertiaMiddleware(self.get_response)(request)
-```
-
-**Detection:**
-- `/admin/` shows `<div id="app"></div>` instead of admin interface
-- Admin CSS returns 404s in network tab
-- Admin redirects to React routes
-
-**Phase:** Phase 2 (Frontend Consolidation) - Test admin immediately after URL changes
-
-**Sources:**
-- LOW confidence (extrapolated from URL routing best practices, not specifically documented for Inertia)
+**Phase to address:**
+SSE frontend integration phase. Must be tested specifically with Inertia page navigation -- not just unmounting the component in isolation.
 
 ---
 
-### Pitfall 4: JSON Serialization Failures with Related Models
-**What goes wrong:** Django Rest Framework serializers (currently used in views.py) don't work with Inertia's default encoder, causing related models to not serialize or fields to be missing.
+## Technical Debt Patterns
 
-**Why it happens:**
-- Inertia uses `model_to_dict()` which excludes `editable=False` fields (timestamps, auto-generated)
-- `select_related()` and `prefetch_related()` objects don't convert to JSON
-- DRF serializers expect `.data` attribute but Inertia expects raw dicts
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|----------|-------------------|----------------|-----------------|
+| Polling instead of SSE | No ASGI server needed, simpler architecture | 2-second latency on progress, more server load from polling requests, worse UX | Acceptable for MVP if SSE architecture is too complex to add now. Easy to replace later since the progress-in-Redis pattern is the same. |
+| Single supervisor job instead of RQ dependency chains | Simpler error handling, sequential progress updates | One long-running job blocks a worker for entire pipeline duration (2-5 min); no parallelism between independent steps | Acceptable initially. Refactor to parallel steps (WAF + robots.txt simultaneously) when pipeline performance matters. |
+| Storing progress in `job.meta` instead of Redis hash | No extra Redis key management | `job.meta` requires `job.save_meta()` which does a full Redis write of the entire meta dict. Polling progress requires fetching the full job object. Cannot be read from the SSE service without importing RQ. | Never for SSE integration. Use a dedicated Redis hash from the start -- it is barely more code and far more flexible. |
+| Using `urllib.robotparser` instead of Protego | Zero dependencies, stdlib | No wildcard pattern support, buggy with malformed robots.txt, no crawl-delay support | Never. Protego is a small, well-maintained library that handles real-world robots.txt correctly. The stdlib parser will silently give wrong answers. |
+| Skipping `extruct` error handling, letting it crash | Faster implementation | Any malformed JSON-LD, missing schema, or trailing semicolon crashes the entire pipeline for that URL | Never. Extruct extraction must always be wrapped in try/except with graceful degradation to partial results. |
 
-**Consequences:**
-- Missing `created_at`, `updated_at` timestamps in frontend
-- Related models return object references instead of data
-- Frontend receives incomplete data, causing undefined errors
-- N+1 query problems when you add manual serialization workarounds
+## Integration Gotchas
 
-**Prevention:**
+| Integration | Common Mistake | Correct Approach |
+|-------------|----------------|------------------|
+| SSE + Inertia CSRF | SSE `EventSource` cannot send custom headers (no CSRF token). If the SSE endpoint is behind CSRF middleware, all connections fail with 403. | Exempt SSE views from CSRF using `@csrf_exempt` or use `CsrfViewMiddleware` exclusion. SSE is GET-only and read-only, so CSRF protection is not needed. |
+| RQ + Django ORM | RQ worker runs in a separate process. If you pass Django model instances as job arguments, they become stale -- the worker has a different database connection and may see outdated data. | Pass IDs (integers) as job arguments, not model instances. Re-fetch from the database inside the job function. |
+| RQ + Django settings | RQ worker process does not automatically load Django settings. Importing models or using ORM in job functions fails with `django.core.exceptions.ImproperlyConfigured`. | Use `django-rq` which handles Django setup, or call `django.setup()` in worker initialization. Configure via `RQ_QUEUES` in Django settings. |
+| curl-cffi + Zyte fallback | Using different HTTP clients for primary vs. fallback means different cookie handling, redirect behavior, timeout semantics, and error types. Error handling code assumes one response format. | Define a `FetchResult` dataclass that both fetchers return. Normalize errors to a common exception type. Test the fallback path explicitly -- it will have different failure modes. |
+| curl-cffi TLS impersonation + target site | Choosing wrong browser impersonation profile. Some CDNs/WAFs fingerprint specific browser versions and block outdated ones. Using `impersonate="chrome110"` when the site expects Chrome 120+ JA3 fingerprint. | Use recent browser versions: `impersonate="chrome"` (latest), not a specific version. Rotate impersonation profiles if you hit blocks. Check curl-cffi release notes for supported browser versions. |
+| Redis + Django `runserver` | Django dev server is single-threaded. If an SSE view blocks waiting for Redis pub/sub, the entire dev server hangs. No other requests can be served. | In development, use polling or a separate process for SSE. Or use `runserver --nothreading=False` (Django 4.1+) to enable threading. Better: use uvicorn for dev when SSE routes exist. |
+| extruct + Zyte-fetched HTML | Zyte returns base64-encoded HTTP response body, decoded as UTF-8. Some pages return Shift_JIS, ISO-8859-1, or other encodings. The current `b64decode(...).decode("utf-8")` will throw `UnicodeDecodeError` on non-UTF-8 pages. | Use `chardet` or `charset-normalizer` to detect encoding, or use Zyte's `browserHtml` option which always returns UTF-8. Wrap decode in try/except with fallback to `latin-1`. |
+| SSE + nginx (production) | nginx's default `proxy_buffering on` buffers the entire response before forwarding to the client. SSE events do not reach the browser until the connection closes. | Add `X-Accel-Buffering: no` header on SSE responses, or set `proxy_buffering off` in the nginx location block for SSE routes. Also set `proxy_read_timeout` high enough for the analysis duration. |
 
-**Option 1: Use Inertia's InertiaMeta (Recommended for new code)**
-```python
-from inertia import InertiaMeta
+## Performance Traps
 
-class Publisher:
-    # ... model fields ...
+| Trap | Symptoms | Prevention | When It Breaks |
+|------|----------|------------|----------------|
+| Opening a new curl-cffi `Session` per request instead of reusing | Works fine for 1-10 requests, then connection establishment adds 200-500ms per fetch and TLS handshakes pile up | Create one `Session` per worker process (module-level or singleton). Reuse across requests. `Session` handles connection pooling internally. | > 50 concurrent analyses. Each new session = new TCP + TLS handshake. |
+| SSE endpoint doing database queries to check progress | Each SSE poll iteration queries PostgreSQL for job status. Under load, this creates sustained query pressure on the database. | Store progress in Redis (fast, in-memory). SSE endpoint reads only from Redis, never from PostgreSQL. Database is written to only when pipeline steps complete. | > 20 concurrent SSE connections polling at 1-second intervals = 20 QPS sustained on PostgreSQL just for status checks. |
+| Not setting `maxmemory` on Redis in Docker | Redis grows unbounded. Analysis progress keys, RQ job data, and failed job registries accumulate. Eventually Redis uses all available container memory and starts OOM-killing or swapping. | Set `maxmemory 256mb` (or appropriate limit) with `maxmemory-policy allkeys-lru`. Set TTL on all progress keys (e.g., 1 hour). Clean up completed analysis keys after the SSE stream closes. | After hundreds of analyses without cleanup, or if a bug causes keys to never expire. |
+| Synchronous LLM calls in the RQ worker blocking on API latency | LLM publisher resolution takes 2-10 seconds per call. The worker is blocked during this time, unable to process other jobs. With 1-2 workers, this creates a bottleneck. | Use pydantic-ai's async support if running in an async context, or ensure enough RQ workers to handle concurrent LLM calls. Consider a dedicated queue for LLM tasks with its own worker pool. | > 5 concurrent analyses, each making 1-2 LLM calls. Workers spend most of their time waiting on API responses. |
 
-    class InertiaMeta:
-        fields = ['id', 'name', 'url', 'detected_waf', 'created_at']
-```
+## Security Mistakes
 
-**Option 2: Convert DRF serializers to dicts**
-```python
-# views.py - Explicitly call .data
-def table(request):
-    # ... existing logic ...
-    serialized = PublisherWithReportsSerializer(result, many=True)
+| Mistake | Risk | Prevention |
+|---------|------|------------|
+| SSE endpoint returns analysis data without authentication check | Any user can watch any analysis progress by guessing the analysis ID. Could leak publisher intelligence data. | SSE endpoint must verify the requesting user owns the analysis. Use session authentication (cookies are sent with EventSource automatically). Generate analysis IDs as UUIDs, not sequential integers. |
+| Passing user-supplied URLs directly to curl-cffi without validation | SSRF (Server-Side Request Forgery). User submits `http://169.254.169.254/latest/meta-data/` and the server fetches AWS metadata. Or `http://localhost:6379/` to probe internal Redis. | Validate URL scheme (only `http`/`https`), resolve hostname to IP and reject private/internal ranges (10.x, 172.16-31.x, 192.168.x, 127.x, 169.254.x, ::1). Use `ipaddress` module for range checking. |
+| Storing raw LLM responses without sanitization | LLM might return unexpected content (hallucinated HTML, markdown injection, or XSS payloads) that gets rendered in the React frontend. | Treat all LLM output as untrusted. Use Pydantic models to validate structure. React's JSX auto-escapes by default, but avoid `dangerouslySetInnerHTML` with LLM output. Validate publisher names against a reasonable character set. |
+| Redis connection string with password exposed in Docker logs | Docker compose `command: redis-server --requirepass mypassword` appears in `docker-compose.yml` and process listing. | Use environment variables for Redis password. Store in `.env` file (already gitignored). Use `REDIS_URL` connection string pattern. |
 
-    return render(request, {
-        'publishers': serialized.data  # .data returns list of dicts
-    })
-```
+## UX Pitfalls
 
-**Option 3: Custom JSON Encoder**
-```python
-# settings.py
-INERTIA = {
-    'JSON_ENCODER': 'yourapp.encoders.CustomInertiaEncoder'
-}
+| Pitfall | User Impact | Better Approach |
+|---------|-------------|-----------------|
+| Progress bar shows percentage but no context | User sees "45%" but has no idea what is happening. Feels slow and opaque. | Show step names with status: "Checking robots.txt... done", "Fetching page... in progress", "Extracting metadata... waiting". Progress bar + step list. |
+| SSE connection fails silently | User stares at spinner forever. No error message, no retry indication. | Implement client-side reconnection with exponential backoff (1s, 2s, 4s, max 30s). After 3 failures, show "Connection lost. Retrying..." message. After max retries, show error with manual retry button. |
+| Analysis fails mid-pipeline, only shows "Error" | User has no idea what went wrong or whether partial results were saved. They do not know if retrying will help. | Show which step failed and why: "Page fetch failed: site returned 403 Forbidden. WAF detection and robots.txt results are still available." Partial results should be visible and saved. |
+| Starting duplicate analyses for the same URL | User clicks "Analyze" twice, or submits the same URL from different tabs. Two pipelines run simultaneously, racing to create/update the same publisher. | Check for in-progress analyses for the same normalized URL before starting a new one. Show existing in-progress analysis if one exists. Use a Redis lock keyed by normalized URL. |
 
-# encoders.py
-from inertia.utils import InertiaJsonEncoder
-from rest_framework.serializers import Serializer
+## "Looks Done But Isn't" Checklist
 
-class CustomInertiaEncoder(InertiaJsonEncoder):
-    def default(self, obj):
-        if isinstance(obj, Serializer):
-            return obj.data
-        return super().default(obj)
-```
+- [ ] **SSE streaming:** Works in dev with `runserver` but SSE events batch in production behind nginx -- verify `X-Accel-Buffering: no` header is set and nginx config has `proxy_buffering off` for SSE routes
+- [ ] **RQ pipeline:** Happy path works but failure handling is untested -- verify that a failure at each individual step produces a visible error in the SSE stream and does not leave the pipeline stuck
+- [ ] **robots.txt:** Parses clean robots.txt but not malformed ones -- verify with real-world robots.txt from sites like facebook.com (empty), bloomberg.com (wildcard patterns), and a site returning 403 for robots.txt
+- [ ] **URL normalization:** Works for common URLs but not edge cases -- verify with IDN domains, URLs with port numbers, URLs with authentication credentials, URLs with fragments, and uppercase hostnames
+- [ ] **Publisher resolution:** LLM returns a name for common domains but hallucinates for obscure ones -- verify with subdomains (blog.example.com vs example.com), CDN domains (d1234.cloudfront.net), and URL shorteners (bit.ly/abc)
+- [ ] **extruct extraction:** Works on pages with clean schema.org markup but crashes on malformed JSON-LD -- verify with pages that have: no structured data, malformed JSON in script tags, multiple conflicting schemas, and HTML entities in JSON-LD
+- [ ] **SSE cleanup:** Works when user stays on the page but leaks connections on navigation -- verify by starting an analysis, navigating away with Inertia, and checking server-side connection count
+- [ ] **Redis progress keys:** Written during analysis but never cleaned up -- verify TTL is set on all keys and completed analysis keys are deleted after the SSE stream closes
+- [ ] **curl-cffi fallback to Zyte:** Primary fetcher works but fallback path is untested -- verify by making curl-cffi fail (block a domain) and confirming Zyte fallback activates and returns the same `FetchResult` format
 
-**Detection:**
-- Frontend props missing expected fields
-- Console errors: `Cannot read property 'created_at' of undefined`
-- Related models show `[object Object]` or object references
-- Inertia debug shows incomplete prop data
+## Recovery Strategies
 
-**Phase:** Phase 1 (Inertia Setup) - Surfaces immediately when migrating from DRF serializers
+| Pitfall | Recovery Cost | Recovery Steps |
+|---------|---------------|----------------|
+| Duplicate publishers from poor normalization | MEDIUM | Write a migration script that normalizes all publisher URLs, merges duplicates (keeping the one with most data), and re-points WAFReport/TermsDiscovery foreign keys. Run once, add unique constraint. |
+| Zombie SSE connections exhausting workers | LOW | Restart gunicorn/uvicorn workers. Add connection timeout on server side (close SSE after max duration). Fix cleanup code in React component. |
+| Orphaned RQ jobs in DeferredJobRegistry | LOW | Use `rq` CLI: `rq requeue --all -q default`. Add monitoring for deferred job count. Fix dependency chain to use `allow_failure=True`. |
+| curl-cffi segfault crashing workers | HIGH | Audit all curl-cffi usage for `stream=True`. Replace with non-streaming calls. Add process-level monitoring to auto-restart crashed workers (supervisord or Docker restart policy). |
+| Redis OOM from progress key accumulation | LOW | Flush expired keys with `redis-cli --scan --pattern "analysis:*"`. Add TTL to all keys. Set `maxmemory-policy allkeys-lru`. |
+| LLM hallucinating publisher names | LOW | Add manual override UI for publisher names. Store LLM confidence score. Flag low-confidence results for human review. Compare against existing publisher database before creating new records. |
 
-**Sources:**
-- [django-inertia Issue #18](https://github.com/inertiajs/inertia-django/issues/18)
-- [inertia-django README](https://github.com/inertiajs/inertia-django/blob/main/README.md)
-- [inertia-django PyPI](https://pypi.org/project/inertia-django/)
+## Pitfall-to-Phase Mapping
 
----
+| Pitfall | Prevention Phase | Verification |
+|---------|------------------|--------------|
+| Inertia middleware interfering with SSE (Critical #1) | Infrastructure (SSE endpoint setup) | Single SSE event streams to browser immediately, not batched |
+| WSGI worker exhaustion (Critical #2) | Infrastructure (server architecture) | 5 concurrent SSE connections do not block normal page loads |
+| RQ dependent job abandonment (Critical #3) | Task pipeline (job chain design) | Intentionally fail each pipeline step; verify error appears in SSE stream within 5 seconds |
+| curl-cffi streaming crash (Critical #4) | Page fetching (fetcher implementation) | Fetch 10 slow/chunked-response URLs; zero worker crashes |
+| URL normalization duplicates (Critical #5) | URL normalization (first pipeline step) | Submit `http://WWW.Example.Com:80/` and `https://example.com` -- same publisher record created |
+| SSE cleanup on unmount (Critical #6) | SSE frontend (React component) | Start analysis, navigate away via Inertia, verify server connection count drops to 0 |
+| robots.txt malformed parsing | Pipeline step (robots.txt check) | Parse robots.txt from 20 real-world sites including known edge cases (empty, 403, wildcards) |
+| extruct crash on malformed JSON-LD | Pipeline step (metadata extraction) | Run extruct on 20 real-world pages; zero unhandled exceptions |
+| LLM publisher hallucination | Pipeline step (publisher resolution) | Test with 10 ambiguous domains (CDN, subdomains, URL shorteners); all return "unknown" or correct name, never fabricated names |
+| Redis memory unbounded growth | Infrastructure (Redis setup) | Run 100 analyses; verify Redis memory stays under `maxmemory` limit; all progress keys have TTL |
+| SSE CORS / nginx buffering | Infrastructure (deployment config) | SSE works end-to-end through nginx reverse proxy in staging |
 
-### Pitfall 5: Vite Manifest Path Misalignment After Consolidation
-**What goes wrong:** After moving from `sgui/` to `scrapegrape/frontend/`, Vite builds `manifest.json` to new location but Django still looks in old path, causing all assets to 404.
+## Sources
 
-**Why it happens:**
-- `django-vite` template tags reference old `DJANGO_VITE_ASSETS_PATH`
-- Vite `build.outDir` points to new location
-- `STATICFILES_DIRS` not updated to include new frontend dist
-- `base` in `vite.config.ts` doesn't match Django's `STATIC_URL`
-
-**Consequences:**
-- Production build shows blank page (JS 404s)
-- Dev server works but production fails
-- Deployment fails silently (no errors, but app doesn't load)
-- Browser console: "Failed to load resource: 404" for all JS/CSS
-
-**Prevention:**
-
-**Before consolidation - Current structure:**
-```python
-# settings.py
-STATICFILES_DIRS = [
-    BASE_DIR / "sgui" / "dist"
-]
-```
-
-```typescript
-// sgui/vite.config.ts
-export default defineConfig({
-  build: {
-    outDir: "dist",
-    manifest: "manifest.json",
-  },
-  base: "/static/",
-})
-```
-
-**After consolidation - New structure:**
-```python
-# settings.py
-STATICFILES_DIRS = [
-    BASE_DIR / "scrapegrape" / "frontend" / "dist"  # CHANGED
-]
-
-DJANGO_VITE_ASSETS_PATH = BASE_DIR / "scrapegrape" / "frontend" / "dist"
-```
-
-```typescript
-// scrapegrape/frontend/vite.config.ts
-export default defineConfig({
-  build: {
-    outDir: "dist",  # Relative to scrapegrape/frontend/
-    manifest: "manifest.json",
-  },
-  base: "/static/",  # Must match STATIC_URL
-})
-```
-
-**Detection:**
-- `python manage.py collectstatic` succeeds but files in wrong location
-- Production shows blank page
-- `curl http://localhost:8000/static/manifest.json` returns 404
-- Django template `{% vite_asset 'src/main.tsx' %}` renders broken paths
-
-**Phase:** Phase 2 (Frontend Consolidation) - Test build process before deployment
-
-**Sources:**
-- [django-vite PyPI](https://pypi.org/project/django-vite/)
-- [django-vite Issue #161](https://github.com/MrBin99/django-vite/issues/161)
-- [Using Vite with Django Gist](https://gist.github.com/lucianoratamero/7fc9737d24229ea9219f0987272896a2)
+- [Django ticket #36655: GZipMiddleware buffers streaming responses](https://code.djangoproject.com/ticket/36655) -- HIGH confidence
+- [Django ticket #36656: GZipMiddleware drops async streaming content](https://code.djangoproject.com/ticket/36656) -- HIGH confidence
+- [gunicorn worker timeout with streaming (issue #1186)](https://github.com/benoitc/gunicorn/issues/1186) -- HIGH confidence
+- [Django StreamingHttpResponse blog (Anze Pecar)](https://blog.pecar.me/django-streaming-responses) -- MEDIUM confidence
+- [RQ Dependency class and allow_failure (issue #2006)](https://github.com/rq/rq/issues/2006) -- HIGH confidence
+- [RQ dependent job failure handling (issue #1224)](https://github.com/rq/rq/issues/1224) -- HIGH confidence
+- [RQ job chaining (issue #1503)](https://github.com/rq/rq/issues/1503) -- HIGH confidence
+- [curl-cffi crash on session close during streaming (issue #675)](https://github.com/lexiforest/curl_cffi/issues/675) -- HIGH confidence
+- [curl-cffi timeout issues in stream mode (issue #215)](https://github.com/lexiforest/curl_cffi/issues/215) -- HIGH confidence
+- [curl-cffi documentation: quick start](https://curl-cffi.readthedocs.io/en/latest/quick_start.html) -- HIGH confidence
+- [extruct: Accept JSON parsing errors in JSON-LD (issue #45)](https://github.com/scrapinghub/extruct/issues/45) -- HIGH confidence
+- [extruct: Handle badly formatted JSON-LD (issue #87)](https://github.com/scrapinghub/extruct/issues/87) -- HIGH confidence
+- [Protego robots.txt parser (GitHub)](https://github.com/scrapy/protego) -- HIGH confidence
+- [Python robotparser crawl-delay bug (cpython issue #60303)](https://github.com/python/cpython/issues/60303) -- HIGH confidence
+- [url-normalize library (GitHub)](https://github.com/niksite/url-normalize) -- MEDIUM confidence
+- [React SSE implementation guide (OneUpTime)](https://oneuptime.com/blog/post/2026-01-15-server-sent-events-sse-react/view) -- MEDIUM confidence
+- [SSE practical guide (Tiger Abrodi)](https://tigerabrodi.blog/server-sent-events-a-practical-guide-for-the-real-world) -- MEDIUM confidence
+- [MDN: Using server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events) -- HIGH confidence
+- [Redis memory limits in Docker Compose (Peter Kellner)](https://peterkellner.net/2023/09/24/Managing-Redis-Memory-Limits-with-Docker-Compose/) -- MEDIUM confidence
+- [Browser SSE connection limit (6 per domain over HTTP/1.1)](https://blog.pranshu-raj.me/posts/exploring-sse/) -- MEDIUM confidence
+- [Inertia middleware source code (inertia-django)](https://github.com/inertiajs/inertia-django) -- HIGH confidence (verified against installed package)
 
 ---
-
-### Pitfall 6: Template Migration Leaves Zombie {% load %} Tags
-**What goes wrong:** Migrating from `base.html` with `{% load django_vite %}` to Inertia root template, but forgetting to remove django-vite tags while adding Inertia tags causes asset duplication or load failures.
-
-**Why it happens:**
-- `base.html` currently has `{% vite_hmr_client %}`, `{% vite_react_refresh %}`, `{% vite_asset 'src/main.tsx' %}`
-- Inertia requires different template structure with `{{ inertia }}` placeholder
-- Old tags attempt to load React twice, causing hydration errors
-
-**Consequences:**
-- React renders twice (once from Vite, once from Inertia)
-- Hydration mismatches: "Hydration failed because the initial UI does not match"
-- Asset loaded twice, doubling bundle size
-- State management breaks (two React instances)
-
-**Prevention:**
-
-**Before (current base.html):**
-```django
-{% load django_vite %}
-<body>
-    <div id="root"></div>
-    {% block extra_body %}{% endblock %}
-
-    {% vite_hmr_client %}
-    {% vite_react_refresh %}
-    {% vite_asset 'src/main.tsx' %}
-</body>
-```
-
-**After (Inertia base.html):**
-```django
-{# NO django_vite tags! #}
-<body>
-    {{ inertia }}  {# Inertia handles all asset loading #}
-</body>
-```
-
-**Note:** Remove `{% load django_vite %}` from template AND `django-vite` from `INSTALLED_APPS` once fully migrated.
-
-**Detection:**
-- Browser console: "Warning: Expected server HTML to contain a matching <div> in <div>"
-- React DevTools shows two root instances
-- Network tab shows duplicate JS bundle requests
-- Hydration errors in console
-
-**Phase:** Phase 1 (Inertia Setup) - During initial template conversion
-
-**Sources:**
-- LOW confidence (extrapolated from React hydration best practices and Inertia template requirements)
-
----
-
-## Moderate Pitfalls
-
-Cause bugs or performance issues, but recoverable.
-
-### Pitfall 7: Partial Reload Performance Traps
-**What goes wrong:** All props execute on the server even during partial reloads, causing expensive queries to run unnecessarily.
-
-**Why it happens:** Inertia evaluates all props server-side before filtering to requested fields, unless you use lazy evaluation.
-
-**Consequences:**
-- Partial reload of one field still runs all 3 subqueries (WAF, discovery, evaluation)
-- Slow response times (200ms becomes 1s+ on large datasets)
-- Database connection pool exhaustion under load
-- Frontend feels sluggish despite partial reload optimization
-
-**Prevention:**
-```python
-# views.py - Wrap expensive queries in lambdas
-def table(request):
-    publishers = Publisher.objects.all()
-
-    return render(request, 'index', {
-        'publishers': publishers,
-        # Lazy evaluation - only runs when requested
-        'waf_reports': lambda: get_waf_reports(publishers),
-        'discovery_results': lambda: get_discovery_results(publishers),
-        'evaluation_results': lambda: get_evaluation_results(publishers),
-    })
-```
-
-Frontend requests specific prop:
-```javascript
-router.reload({ only: ['waf_reports'] })  // Others not evaluated
-```
-
-**Detection:**
-- Django Debug Toolbar shows all queries running on partial reload
-- Slow response times for partial reloads
-- Database query logs show unnecessary queries
-
-**Phase:** Phase 3 (Optimization) - After basic functionality works
-
-**Sources:**
-- [Inertia.js Partial Reloads](https://inertiajs.com/partial-reloads)
-- [Partial Reloads Documentation](https://inertiajs.com/docs/v2/data-props/partial-reloads)
-
----
-
-### Pitfall 8: Shared Data Not Available on Initial Load
-**What goes wrong:** Using Inertia's `share()` middleware for user authentication or CSRF tokens, but data is missing on first page load.
-
-**Why it happens:**
-- Shared data middleware runs after InertiaMiddleware in `MIDDLEWARE` stack
-- Initial render doesn't trigger middleware in correct order
-- CSRF token generated but not passed to frontend
-
-**Consequences:**
-- User prop is `null` on first page load, then appears on navigation
-- CSRF token missing, first form submission fails
-- Flash messages don't display
-- Inconsistent behavior (works on reload, not initial visit)
-
-**Prevention:**
-```python
-# settings.py - InertiaMiddleware MUST be last (or near-last)
-MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'yourapp.middleware.InertiaShareMiddleware',  # Custom share middleware
-    'inertia.middleware.InertiaMiddleware',  # LAST (or before whitenoise)
-]
-
-# middleware.py - Share common data
-from inertia import share
-
-class InertiaShareMiddleware:
-    def __init__(self, get_response):
-        self.get_response = get_response
-
-    def __call__(self, request):
-        share(request,
-            user=lambda: request.user.username if request.user.is_authenticated else None,
-            csrf_token=lambda: request.META.get('CSRF_COOKIE'),
-        )
-        return self.get_response(request)
-```
-
-**Detection:**
-- Props are `undefined` on initial load, defined after navigation
-- First form submission fails, subsequent work
-- Browser network tab shows shared props missing in initial response
-
-**Phase:** Phase 1 (Inertia Setup) - When adding authentication or shared state
-
-**Sources:**
-- [inertia-django PyPI](https://pypi.org/project/inertia-django/)
-- [Inertia Django README](https://github.com/inertiajs/inertia-django/blob/main/README.md)
-- MEDIUM confidence
-
----
-
-### Pitfall 9: Development Server CORS Issues After Consolidation
-**What goes wrong:** Moving frontend from standalone `sgui/` dev server (port 5173) to `scrapegrape/frontend/` breaks HMR (Hot Module Reload) with CORS errors.
-
-**Why it happens:**
-- Vite dev server runs on `localhost:5173`, Django on `localhost:8000`
-- Browser blocks HMR WebSocket connection
-- `django-vite` expects dev server at specific URL
-
-**Consequences:**
-- HMR doesn't work (requires full page refresh)
-- Dev experience degrades significantly
-- CORS errors in console: "Access to XMLHttpRequest at 'http://localhost:5173' blocked"
-- Vite overlay doesn't show errors
-
-**Prevention:**
-```typescript
-// vite.config.ts
-export default defineConfig({
-  server: {
-    host: '0.0.0.0',
-    port: 5173,
-    cors: true,  // Allow cross-origin requests
-    strictPort: true,
-  },
-})
-```
-
-```python
-# settings.py
-DJANGO_VITE_DEV_MODE = DEBUG
-DJANGO_VITE_DEV_SERVER_HOST = 'localhost'
-DJANGO_VITE_DEV_SERVER_PORT = 5173
-```
-
-**Detection:**
-- Changes to React components don't auto-reload
-- Console: "WebSocket connection failed"
-- `django-vite` tries to connect to wrong URL
-- HMR overlay not appearing
-
-**Phase:** Phase 2 (Frontend Consolidation) - Test dev server immediately after moving files
-
-**Sources:**
-- [django-vite GitHub](https://github.com/MrBin99/django-vite)
-- LOW confidence (standard Vite+Django setup, not Inertia-specific)
-
----
-
-### Pitfall 10: Asset Version Mismatch Causes Infinite Reloads
-**What goes wrong:** Inertia's version checking triggers full page reload on every request, causing infinite reload loop.
-
-**Why it happens:**
-- `INERTIA_VERSION` changes on every request (e.g., using timestamp)
-- Manifest hash changes but version not updated
-- Deployment pushes new assets but backend still reports old version
-
-**Consequences:**
-- Browser stuck in reload loop
-- Users can't access application
-- "This page isn't working" errors
-- High server load from reload requests
-
-**Prevention:**
-```python
-# settings.py - Use manifest hash for versioning
-import json
-from pathlib import Path
-
-def get_inertia_version():
-    manifest_path = BASE_DIR / 'scrapegrape' / 'frontend' / 'dist' / 'manifest.json'
-    if manifest_path.exists():
-        with open(manifest_path) as f:
-            manifest = json.load(f)
-            # Use manifest file hash or specific entry
-            return manifest.get('src/main.tsx', {}).get('file', 'v1')
-    return 'dev'  # Development fallback
-
-INERTIA = {
-    'VERSION': get_inertia_version(),  # Static per deployment
-    # OR
-    'VERSION': '1.0.0',  # Manual version bump
-}
-```
-
-**Detection:**
-- Browser console shows repeated page loads
-- Network tab shows request → 409 → reload → request cycle
-- Django logs show constant Inertia version mismatch warnings
-
-**Phase:** Phase 4 (Production Deployment) - Test before deploying to production
-
-**Sources:**
-- [Inertia.js Upgrade Guide](https://inertiajs.com/upgrade-guide)
-- MEDIUM confidence
-
----
-
-## Minor Pitfalls
-
-Annoying but easy to fix.
-
-### Pitfall 11: TypeScript Path Aliases Break After Move
-**What goes wrong:** Moving from `sgui/src/` to `scrapegrape/frontend/src/` breaks `@/` imports in React components.
-
-**Why it happens:** `tsconfig.json` has `"@": "./src"` which is now at different relative path.
-
-**Consequences:**
-- TypeScript errors: "Cannot find module '@/components/Table'"
-- Build fails with unresolved imports
-- IDE auto-import inserts wrong paths
-
-**Prevention:**
-```json
-// scrapegrape/frontend/tsconfig.json
-{
-  "compilerOptions": {
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["./src/*"]  // Verify this resolves correctly
-    }
-  }
-}
-```
-
-```typescript
-// vite.config.ts - Ensure alias matches
-import path from 'path'
-
-export default defineConfig({
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-    },
-  },
-})
-```
-
-**Detection:**
-- Build errors: "Cannot resolve '@/components/...'"
-- IDE shows red squiggles on `@/` imports
-
-**Phase:** Phase 2 (Frontend Consolidation) - Immediately when moving files
-
-**Sources:**
-- Standard TypeScript/Vite configuration issue
-
----
-
-### Pitfall 12: Forgetting to Remove json_script Template Filter
-**What goes wrong:** Current implementation uses `{{ serialized|json_script:"publisher-data" }}` which leaves `<script id="publisher-data">` in DOM that React tries to parse.
-
-**Why it happens:** Old pattern embeds JSON in template, new pattern passes via Inertia props, but old code remains.
-
-**Consequences:**
-- Data duplicated (in DOM script tag AND Inertia props)
-- React might parse wrong data source
-- Security: sensitive data exposed in HTML
-- Larger page size (data serialized twice)
-
-**Prevention:**
-```django
-{# OLD - Remove this #}
-{% block extra_body %}
-    {{ serialized|json_script:"publisher-data" }}
-{% endblock extra_body %}
-
-{# NEW - Inertia handles data passing #}
-{# No extra_body block needed #}
-```
-
-```python
-# views.py - Pass data via Inertia props, not context
-def table(request):
-    # OLD
-    # return render(request, 'index.html', {'serialized': data})
-
-    # NEW
-    return render(request, 'index', {
-        'publishers': data  # Available as props.publishers in React
-    })
-```
-
-**Detection:**
-- View source shows `<script id="publisher-data" type="application/json">`
-- React DevTools shows props AND window.__INITIAL_STATE__ or similar
-- Data visible in HTML source (security concern)
-
-**Phase:** Phase 1 (Inertia Setup) - When converting first view
-
-**Sources:**
-- Current codebase pattern
-
----
-
-### Pitfall 13: Missing Root Element After Template Change
-**What goes wrong:** Inertia expects `<div id="app">` but current template has `<div id="root">`, causing "Target container is not a DOM element" error.
-
-**Why it happens:** React traditionally uses `id="root"`, Inertia defaults to `id="app"` (configurable).
-
-**Consequences:**
-- Blank page
-- Console error: "Application root element not found"
-- Inertia can't mount React
-
-**Prevention:**
-
-**Option 1: Change template to match Inertia default**
-```django
-{# base.html #}
-<body>
-    <div id="app" data-page="{{ inertia }}"></div>
-</body>
-```
-
-**Option 2: Configure Inertia to use existing root**
-```javascript
-// app.jsx
-createInertiaApp({
-  resolve: name => import(`./Pages/${name}.tsx`),
-  setup({ el, App, props }) {
-    createRoot(el).render(<App {...props} />)
-  },
-  id: 'root',  // Match existing template
-})
-```
-
-**Detection:**
-- Blank page after Inertia setup
-- Console: "Target container is not a DOM element"
-
-**Phase:** Phase 1 (Inertia Setup) - During initial app.jsx setup
-
-**Sources:**
-- Inertia.js documentation
-
----
-
-### Pitfall 14: Docker Volume Mounts Don't Include New Frontend Path
-**What goes wrong:** `docker-compose.yml` mounts `./sgui/` but not `./scrapegrape/frontend/`, breaking dev server in Docker.
-
-**Why it happens:** Volume mounts not updated after consolidation.
-
-**Consequences:**
-- Docker dev server doesn't see frontend code changes
-- HMR doesn't work in Docker
-- Build fails due to missing files
-
-**Prevention:**
-```yaml
-# docker-compose.yml - Update volume mounts
-services:
-  web:
-    volumes:
-      - ./scrapegrape:/app/scrapegrape  # Changed from ./sgui
-      # OR more specific
-      - ./scrapegrape/frontend:/app/scrapegrape/frontend
-```
-
-**Detection:**
-- Changes to frontend don't reflect in Docker container
-- `docker exec` into container shows old directory structure
-- Build works locally, fails in Docker
-
-**Phase:** Phase 2 (Frontend Consolidation) - Test Docker immediately after file moves
-
-**Sources:**
-- Standard Docker practices
-
----
-
-## Phase-Specific Warnings
-
-| Phase Topic | Likely Pitfall | Mitigation |
-|-------------|---------------|------------|
-| **Phase 1: Inertia Setup** | CSRF header mismatch (Critical #1) | Configure CSRF settings before first Inertia view |
-| **Phase 1: Inertia Setup** | Axios version conflict (Critical #2) | Check `npm ls axios` immediately after install |
-| **Phase 1: Inertia Setup** | DRF serializer incompatibility (Critical #4) | Test serialization with simple view before migrating complex data |
-| **Phase 2: Frontend Consolidation** | Vite manifest path misalignment (Critical #5) | Run production build test before committing path changes |
-| **Phase 2: Frontend Consolidation** | Django admin routes breaking (Critical #3) | Test `/admin/` immediately after URL routing changes |
-| **Phase 2: Frontend Consolidation** | TypeScript path aliases (Minor #11) | Run `npm run build` to catch import errors early |
-| **Phase 3: Data Migration** | N+1 queries from manual serialization | Use Django Debug Toolbar to monitor query counts |
-| **Phase 4: Production Deployment** | WhiteNoise cache-control misconfiguration | Test static file caching with production settings locally |
-| **Phase 4: Production Deployment** | Asset version mismatch reload loop (Moderate #10) | Verify version stays constant across requests before deployment |
-
----
-
-## Deployment-Specific Gotchas
-
-### SSR Considerations
-**Current status:** Not using SSR
-**Future considerations:** If SSR added later:
-- Requires separate Node.js server process (supervisor/pm2)
-- `INERTIA_SSR_URL` must be accessible from Django server
-- Build process must generate both client and server bundles
-- SSR server must be restarted on deployments
-
-**Recommendation:** Defer SSR until performance metrics show need (LOW confidence - no current requirement)
-
-**Sources:**
-- [Inertia.js SSR Documentation](https://inertiajs.com/server-side-rendering)
-- [Server-Side Rendering Django](https://inertiajs.com/docs/v2/advanced/server-side-rendering)
-
----
-
-### Monorepo Deployment Coordination
-**Risk:** Coupling frontend and backend deployments
-
-**Scenario:**
-1. Backend changes pushed (Django migration)
-2. Frontend not rebuilt
-3. Old JS bundle expects old API response shape
-4. Production errors
-
-**Prevention:**
-- Always build frontend before deploying backend
-- Use atomic deployments (both or neither)
-- Version API responses if breaking changes needed
-- Consider blue-green deployment for zero-downtime
-
-**Sources:**
-- [Monorepos with Django and React](https://www.vintasoftware.com/blog/django-react-monorepo)
-- [Frontend Backend Sync with Monorepo](https://www.highlight.io/blog/keeping-your-frontend-and-backend-in-sync-with-a-monorepo)
-
----
-
-## Testing Strategy to Catch Pitfalls Early
-
-### Phase 1 (Inertia Setup) Checklist
-- [ ] POST request succeeds without CSRF errors
-- [ ] `npm ls axios` shows single version
-- [ ] Serialized data appears correctly in React DevTools props
-- [ ] `/admin/` still loads correctly
-- [ ] No duplicate React renders (check DevTools)
-
-### Phase 2 (Frontend Consolidation) Checklist
-- [ ] `npm run build` succeeds without path errors
-- [ ] `python manage.py collectstatic` collects to correct location
-- [ ] Dev server HMR works (make change, see instant update)
-- [ ] `/static/manifest.json` accessible
-- [ ] Docker build includes new paths
-
-### Phase 3 (Optimization) Checklist
-- [ ] Django Debug Toolbar shows expected query count
-- [ ] Partial reload only fetches requested props
-- [ ] Shared middleware provides user/CSRF on first load
-
-### Phase 4 (Production) Checklist
-- [ ] Asset version stays constant across requests
-- [ ] Static files have correct cache headers
-- [ ] Full deployment test (build → migrate → deploy)
-- [ ] Rollback plan tested
-
----
-
-## Sources Summary
-
-**HIGH Confidence:**
-- [Inertia.js Official Documentation](https://inertiajs.com/)
-- [django-inertia GitHub Repository](https://github.com/inertiajs/inertia-django)
-- [django-inertia PyPI](https://pypi.org/project/inertia-django/)
-- [Django Official Documentation](https://docs.djangoproject.com/)
-
-**MEDIUM Confidence:**
-- [Building Modern Web App with Django, Inertia.js, Vite, and React](https://medium.com/@tanzid3/building-a-modern-web-app-with-django-inertia-js-vite-and-react-67979a981649)
-- [Monorepos with Django and React](https://www.vintasoftware.com/blog/django-react-monorepo)
-- [django-vite PyPI](https://pypi.org/project/django-vite/)
-- Community GitHub Issues
-
-**LOW Confidence (needs validation):**
-- Admin route configuration (extrapolated from Django best practices)
-- Template tag removal side effects (based on React hydration patterns)
-- Docker-specific issues (standard Docker practices, not Inertia-specific)
-
----
-
-## Research Gaps
-
-Areas where additional research may be needed during implementation:
-
-1. **SSR Setup:** If performance requires server-side rendering, need deeper research on Node.js process management in production
-2. **WhiteNoise Configuration:** Specific immutable file patterns for Vite-generated hashes need verification
-3. **django-tasks Integration:** How Inertia views interact with async task queue not researched
-4. **Large Dataset Pagination:** Current research doesn't cover pagination with Inertia (may need phase-specific research)
-5. **WebSocket/Real-time Updates:** If task status updates needed, Inertia polling vs WebSocket integration needs research
-
-**Recommendation:** Address these gaps when specific phases require them, not upfront.
+*Pitfalls research for: URL analysis workflow addition to Django-Inertia app*
+*Researched: 2026-02-13*

@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-02-13
 **Milestone:** v1.0 Inertia Refactor
-**Status:** COMPLETE
+**Status:** v1.0 milestone complete
 
 ---
 

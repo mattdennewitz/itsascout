@@ -1,7 +1,7 @@
 # Requirements: itsascout
 
 **Defined:** 2026-02-13
-**Core Value:** Paste a URL, get a comprehensive scraping report card — what's allowed, what's blocked, and what structured data is available — with real-time progress as each check completes.
+**Core Value:** Paste a URL, get a comprehensive scraping report card -- what's allowed, what's blocked, and what structured data is available -- with real-time progress as each check completes.
 
 ## v2.0 Requirements
 
@@ -100,46 +100,46 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INFRA-01 | — | Pending |
-| INFRA-02 | — | Pending |
-| INFRA-03 | — | Pending |
-| ENTRY-01 | — | Pending |
-| ENTRY-02 | — | Pending |
-| ENTRY-03 | — | Pending |
-| PIPE-01 | — | Pending |
-| PIPE-02 | — | Pending |
-| PIPE-03 | — | Pending |
-| PIPE-04 | — | Pending |
-| FETCH-01 | — | Pending |
-| FETCH-02 | — | Pending |
-| FETCH-03 | — | Pending |
-| DISC-01 | — | Pending |
-| DISC-02 | — | Pending |
-| DISC-03 | — | Pending |
-| DISC-04 | — | Pending |
-| DISC-05 | — | Pending |
-| DISC-06 | — | Pending |
-| DISC-07 | — | Pending |
-| ART-01 | — | Pending |
-| ART-02 | — | Pending |
-| ART-03 | — | Pending |
-| ART-04 | — | Pending |
-| RPRT-01 | — | Pending |
-| RPRT-02 | — | Pending |
-| RPRT-03 | — | Pending |
-| RPRT-04 | — | Pending |
-| RPRT-05 | — | Pending |
-| TEST-01 | — | Pending |
-| TEST-02 | — | Pending |
-| TEST-03 | — | Pending |
-| TEST-04 | — | Pending |
-| TEST-05 | — | Pending |
+| INFRA-01 | Phase 6 | Pending |
+| INFRA-02 | Phase 6 | Pending |
+| INFRA-03 | Phase 6 | Pending |
+| ENTRY-01 | Phase 8 | Pending |
+| ENTRY-02 | Phase 6 | Pending |
+| ENTRY-03 | Phase 8 | Pending |
+| PIPE-01 | Phase 8 | Pending |
+| PIPE-02 | Phase 8 | Pending |
+| PIPE-03 | Phase 8 | Pending |
+| PIPE-04 | Phase 8 | Pending |
+| FETCH-01 | Phase 7 | Pending |
+| FETCH-02 | Phase 7 | Pending |
+| FETCH-03 | Phase 7 | Pending |
+| DISC-01 | Phase 8 | Pending |
+| DISC-02 | Phase 8 | Pending |
+| DISC-03 | Phase 8 | Pending |
+| DISC-04 | Phase 9 | Pending |
+| DISC-05 | Phase 9 | Pending |
+| DISC-06 | Phase 9 | Pending |
+| DISC-07 | Phase 9 | Pending |
+| ART-01 | Phase 10 | Pending |
+| ART-02 | Phase 10 | Pending |
+| ART-03 | Phase 10 | Pending |
+| ART-04 | Phase 10 | Pending |
+| RPRT-01 | Phase 8 | Pending |
+| RPRT-02 | Phase 8 | Pending |
+| RPRT-03 | Phase 11 | Pending |
+| RPRT-04 | Phase 11 | Pending |
+| RPRT-05 | Phase 8 | Pending |
+| TEST-01 | Phase 6 | Pending |
+| TEST-02 | Phase 8 | Pending |
+| TEST-03 | Phase 6 | Pending |
+| TEST-04 | Phase 11 | Pending |
+| TEST-05 | Phase 8 | Pending |
 
 **Coverage:**
 - v2.0 requirements: 34 total
-- Mapped to phases: 0
-- Unmapped: 34 (awaiting roadmap)
+- Mapped to phases: 34
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-13*
-*Last updated: 2026-02-13 after initial definition*
+*Last updated: 2026-02-13 after roadmap creation*

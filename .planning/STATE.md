@@ -1,108 +1,62 @@
-# Project State: itsascout
-
-**Last Updated:** 2026-02-13
-**Milestone:** v2.0 Core Workflow
-**Status:** Defining requirements
-
----
+# Project State
 
 ## Project Reference
 
-**Core Value:** Paste a URL, get a comprehensive scraping report card — what's allowed, what's blocked, and what structured data is available — with real-time progress as each check completes.
+See: .planning/PROJECT.md (updated 2026-02-13)
 
-**Current Focus:** Build the end-to-end URL analysis workflow with streaming progress, durable publisher intelligence, and a report card UI.
-
-**Key Constraints:**
-- Stack: Django + React + Vite + TailwindCSS + Inertia.js (established in v1.0)
-- Async: RQ for task execution, needs Docker setup
-- Fetching: curl-cffi preferred, Zyte as fallback
-- Backwards compatibility: Existing publisher table and admin must continue working
-
----
+**Core value:** Paste a URL, get a comprehensive scraping report card with real-time progress as each check completes.
+**Current focus:** Phase 6 -- Infrastructure & Models
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-02-13 — Milestone v2.0 started
+Phase: 6 of 11 (Infrastructure & Models)
+Plan: 0 of 2 in current phase
+Status: Ready to plan
+Last activity: 2026-02-13 -- v2.0 roadmap created (6 phases, 34 requirements)
 
----
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
-### Velocity
+**Velocity:**
+- Total plans completed: 0 (v2.0)
+- Average duration: --
+- Total execution time: 0 hours
 
-- **Requirements completed:** 0
-- **Estimated remaining:** TBD (requirements not yet defined)
+**By Phase:**
 
-### Quality
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| - | - | - | - |
 
-- **Blockers encountered:** 0
-- **Plans revised:** 0
-- **Rollbacks performed:** 0
+**Recent Trend:**
+- Last 5 plans: --
+- Trend: --
 
-### Milestone
-
-- **Started:** 2026-02-13
-- **Phases completed:** 0
-
----
+*Updated after each plan completion*
 
 ## Accumulated Context
 
-### Key Decisions (from v1.0)
+### Decisions
 
-| Date | Decision | Rationale | Impact |
-|------|----------|-----------|--------|
-| 2026-02-12 | Use django-inertia for refactor | Keeps Django as source of truth, avoids building separate API layer | Foundation for all phases |
-| 2026-02-12 | Consolidate sgui/ into scrapegrape/frontend/ | Single project, simpler DX, co-located code | Established frontend structure |
-| 2026-02-12 | Cookie-based CSRF via Axios defaults | Avoids anti-pattern; cleaner integration | All POST requests auto-include CSRF |
-| 2026-02-12 | Session-based validation pattern | InertiaValidationError doesn't exist in inertia-django 1.2.0 | Reliable form validation pattern |
-| 2026-02-12 | defer() + partial reloads pattern | Instant initial render, only refetch what changed | Established performance patterns |
+Decisions are logged in PROJECT.md Key Decisions table.
+Recent decisions affecting current work:
 
-### Research Notes (from v1.0)
+- [v2.0 roadmap]: TDD constraint -- TEST requirements distributed across feature phases, not isolated
+- [v2.0 roadmap]: RSL detection in scope (DISC-07), grade computation deferred to future milestone
+- [v2.0 roadmap]: SSE serving approach folded into Phase 8 naturally (no separate ASGI requirement)
+- [v2.0 roadmap]: Phase 8 is the core vertical slice (URL entry -> pipeline -> SSE -> results page)
 
-- Stack validated: inertia-django 1.2.0+, @inertiajs/react 2.3.8+
-- Architecture: Django views → render_inertia() → Inertia middleware → React props
-- DRF serializers compatible via .data attribute
+### Pending Todos
 
-### Active Todos
+None yet.
 
-- [ ] Complete research (if selected)
-- [ ] Define v2.0 requirements with REQ-IDs
-- [ ] Create v2.0 roadmap
-
-### Known Blockers
+### Blockers/Concerns
 
 None currently.
 
----
-
 ## Session Continuity
 
-### What Just Happened
-
-Started milestone v2.0 Core Workflow. Updated PROJECT.md with new vision: single-URL entry → streaming pipeline → report card. Publisher data is durable, job data is URL-specific. Existing table stays as admin view.
-
-### What's Next
-
-Research (if selected) → define requirements → create roadmap.
-
-### Context for Next Session
-
-**v2.0 Vision:** User pastes a URL, gets real-time SSE progress as pipeline runs (WAF → publisher resolution → ToS → robots.txt → sitemap → RSS → RSL → metadata profiling → article extraction). Results shown as streaming report card at unique URL. Publisher intelligence accumulates over time.
-
----
-
-### Last Session
-
-- **Date:** 2026-02-13
-- **Stopped at:** Milestone v2.0 started, moving to research/requirements
-- **Next action:** Research decision → requirements → roadmap
-
----
-
-*State initialized: 2026-02-12*
-*Last updated: 2026-02-13*
-*Milestone: v2.0 Core Workflow (started)*
+Last session: 2026-02-13
+Stopped at: v2.0 roadmap created with 6 phases (6-11), 34 requirements mapped
+Resume file: None

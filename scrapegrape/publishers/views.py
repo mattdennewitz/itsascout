@@ -82,17 +82,6 @@ def table(request):
     })
 
 
-def inertia_smoke_test(request):
-    """
-    Temporary smoke test: proves Inertia renders a React component with Django props.
-    Lives at /_debug/inertia/ — remove in Phase 5 cleanup.
-    """
-    return inertia_render(request, 'Debug/InertiaTest', props={
-        'message': 'Inertia is working!',
-        'timestamp': '2026-02-12',
-    })
-
-
 def create(request):
     """Create a new publisher with form validation."""
     if request.method == 'POST':

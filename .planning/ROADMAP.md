@@ -129,8 +129,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 05-01-PLAN.md -- Remove legacy template JSON embedding, dead frontend code, and debug smoke test routes
-- [ ] 05-02-PLAN.md -- Automated and manual verification of all application features after cleanup
+- [x] 05-01-PLAN.md -- Remove legacy template JSON embedding, dead frontend code, and debug smoke test routes
+- [x] 05-02-PLAN.md -- Automated and manual verification of all application features after cleanup
 
 **Requirements:**
 - CLEN-01: Old template JSON embedding pattern removed
@@ -156,9 +156,9 @@ Plans:
 | 2 - Frontend Consolidation | Complete (2026-02-12) | 4 | 100% |
 | 3 - Core View Migration | Complete (2026-02-12) | 5 | 100% |
 | 4 - Interactive Features | Complete (2026-02-12) | 3 | 100% |
-| 5 - Cleanup & Verification | Pending | 4 | 0% |
+| 5 - Cleanup & Verification | Complete (2026-02-13) | 4 | 100% |
 
-**Overall:** 16/20 requirements complete (80%)
+**Overall:** 20/20 requirements complete (100%)
 
 ---
 

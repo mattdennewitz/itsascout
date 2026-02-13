@@ -126,6 +126,12 @@ Plans:
 
 **Dependencies:** Phase 4 (all new patterns implemented before removing old code)
 
+**Plans:** 2 plans
+
+Plans:
+- [ ] 05-01-PLAN.md -- Remove legacy template JSON embedding, dead frontend code, and debug smoke test routes
+- [ ] 05-02-PLAN.md -- Automated and manual verification of all application features after cleanup
+
 **Requirements:**
 - CLEN-01: Old template JSON embedding pattern removed
 - CLEN-02: react-router-dom removed if present

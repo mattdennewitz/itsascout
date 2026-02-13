@@ -102,6 +102,7 @@ Paste a URL, get a comprehensive scraping report card — what's allowed, what's
 - **Fetching**: curl-cffi preferred, Zyte as fallback (cost consideration)
 - **LLM**: pydantic-ai agents for publisher resolution and metadata profiling
 - **Backwards compatibility**: Existing publisher table and admin must continue working
+- **Development approach**: TDD with pytest — tests written before implementation for each pipeline step and service
 
 ## Key Decisions
 

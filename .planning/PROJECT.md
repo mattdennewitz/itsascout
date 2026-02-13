@@ -2,11 +2,25 @@
 
 ## What This Is
 
-A publisher website analysis tool that ingests publisher URLs, runs a 3-stage AI pipeline (WAF detection, Terms of Service discovery, permissions evaluation), and displays results in an interactive SPA powered by Django-Inertia. Built for assessing scraping feasibility and legal permissions across publisher sites at scale.
+A publisher website analysis tool where users paste a single URL and get a streaming scraping report card — WAF detection, ToS discovery, robots.txt analysis, metadata profiling, RSS/sitemap discovery, and RSL licensing checks. Publisher intelligence accumulates over time, so repeat lookups against the same domain are instant. Built on Django-Inertia with an async task pipeline and real-time SSE progress updates.
 
 ## Core Value
 
-Automated analysis of publisher websites to determine scraping permissions and restrictions — WAF detection, ToS discovery, and permission evaluation in a single pipeline.
+Paste a URL, get a comprehensive scraping report card — what's allowed, what's blocked, and what structured data is available — with real-time progress as each check completes.
+
+## Current Milestone: v2.0 Core Workflow
+
+**Goal:** Build the end-to-end URL analysis workflow with streaming progress, durable publisher intelligence, and a report card UI.
+
+**Target features:**
+- Single-URL entry point with real-time SSE progress
+- Resolution job pipeline (publisher resolution → discovery → article analysis)
+- Publisher report card (WAF, ToS, robots.txt, sitemap, RSS, RSL, metadata profile)
+- Article-level metadata extraction and crawl permission check
+- RQ task infrastructure in Docker
+- curl-cffi with Zyte fallback fetch strategy (remembered per publisher)
+- URL sanitization to prevent duplicates
+- Configurable publisher freshness TTL
 
 ## Requirements
 
@@ -35,32 +49,59 @@ Automated analysis of publisher websites to determine scraping permissions and r
 
 <!-- Current scope. Building toward these. -->
 
-(No active requirements — next milestone not yet defined)
+- Single-URL submission with job creation and UUID tracking
+- URL sanitization and deduplication
+- Publisher resolution by domain (homepage visit or LLM web search)
+- Publisher freshness TTL with configurable refresh interval
+- Fetch strategy discovery (curl-cffi first, Zyte fallback, remembered per publisher)
+- Publisher metadata profiling via LLM (article details, byline, paywall, thumbnail, etc.)
+- Structured data format detection (json-ld, opengraph, microdata yes/no indicators)
+- robots.txt discovery and per-URL permission checking
+- Sitemap discovery (common patterns/filenames)
+- RSS feed URL discovery (remember, don't crawl)
+- RSL (Really Simple Licensing) indicator detection
+- ToS/privacy discovery integrated into pipeline
+- Article-level metadata extraction via extruct
+- Real-time SSE progress updates during pipeline execution
+- Report card results page (publisher + article findings at unique URL)
+- RQ worker infrastructure in Docker Compose
+- Existing publisher table stays as admin/management view
 
 ### Out of Scope
 
 <!-- Explicit boundaries. Includes reasoning to prevent re-adding. -->
 
-- New analysis types — separate concern from architecture
-- UI redesign — current table view serves the use case well
-- Tech debt cleanup (hardcoded secrets, etc.) — separate concern
+- RSS feed crawling — just discover and remember URLs, don't fetch content
+- Sitemap crawling — discover existence, don't parse entries
+- Mobile app — web-first approach
 - SSR setup — adds Node.js process complexity, defer until needed
-- Mobile app — web-first approach, PWA potential later
+- New UI for publisher management table — current table serves admin use case
+- Batch/bulk URL analysis — single-URL flow first, batch later
 
 ## Context
 
 **Current state (post v1.0):**
 - Stack: Django 5.2 + React 19.1 + Inertia.js + Vite + TailwindCSS
-- Architecture: Django views → inertia_render() → React page components (no DOM JSON parsing)
+- Architecture: Django views → inertia_render() → React page components
 - Frontend: scrapegrape/frontend/ with 4 page components (Index, Create, Edit, BulkUpload)
-- Build: Vite production build (467 kB gzip: 149 kB), dev server with HMR
-- All features verified working: table, CRUD forms, bulk upload, admin, SPA navigation
+- Existing models: Publisher (domain, name, WAF, ToS, permissions, etc.)
+- Existing tasks: WAF scan, ToS discovery, permissions evaluation (all via Django admin actions)
+- Docker: PostgreSQL + Django, no RQ worker yet
+
+**v2.0 changes needed:**
+- New models: ResolutionJob (UUID, URL, status, progress), publisher metadata profile
+- Extend Publisher model: fetch strategy, last checked date, robots.txt, sitemap URLs, RSS URLs, RSL status, metadata capabilities
+- New services: URL sanitizer, publisher resolver, fetch strategy manager, metadata profiler
+- New infrastructure: RQ worker in Docker, Redis for queue + SSE
+- New frontend: URL entry page, streaming results page
 
 ## Constraints
 
-- **Stack**: Django + React + Vite + TailwindCSS + Inertia.js
-- **Functionality**: All existing features must work identically
-- **Data**: No database schema changes needed
+- **Stack**: Django + React + Vite + TailwindCSS + Inertia.js (established in v1.0)
+- **Async**: RQ for task execution (already partially in place, needs Docker setup)
+- **Fetching**: curl-cffi preferred, Zyte as fallback (cost consideration)
+- **LLM**: pydantic-ai agents for publisher resolution and metadata profiling
+- **Backwards compatibility**: Existing publisher table and admin must continue working
 
 ## Key Decisions
 
@@ -73,6 +114,9 @@ Automated analysis of publisher websites to determine scraping permissions and r
 | Incremental migration (5 phases) | Allows rollback at each boundary, validates early | ✓ Good — zero blockers, zero rollbacks |
 | defer() for expensive queries | Instant initial render with loading spinner | ✓ Good — perceived performance improvement |
 | Partial reloads with only: ['publishers'] | Only refetch what changed during search | ✓ Good — reduced bandwidth, preserved state |
+| SSE for real-time progress | User sees pipeline steps complete in real time, better than polling | — Pending |
+| curl-cffi first, Zyte fallback | Minimize Zyte costs, curl-cffi handles most sites | — Pending |
+| Publisher-level metadata profiling via LLM | Human-readable "what's available" instead of raw format listing | — Pending |
 
 ---
-*Last updated: 2026-02-13 after v1.0 milestone*
+*Last updated: 2026-02-13 after v2.0 milestone start*

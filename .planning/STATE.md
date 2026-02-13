@@ -1,6 +1,6 @@
 # Project State: itsascout
 
-**Last Updated:** 2026-02-12
+**Last Updated:** 2026-02-13
 **Milestone:** v1.0 Inertia Refactor
 **Status:** In Progress
 
@@ -21,19 +21,19 @@
 
 ## Current Position
 
-**Phase:** Phase 4 - Interactive Features
-**Plan:** 04-02 (completed)
-**Status:** Phase 4 complete - 3 of 3 requirements delivered
+**Phase:** Phase 5 - Cleanup and Verification
+**Plan:** 05-01 (completed)
+**Status:** Phase 5 in progress - plan 1 of 2 complete (CLEN-01, CLEN-02, CLEN-03 delivered)
 
 **Progress Bar:**
 ```
-[▓▓▓▓▓▓▓▓▓▱] 16/20 requirements (80%)
+[▓▓▓▓▓▓▓▓▓▓] 19/20 requirements (95%)
 
 Phase 1: [▓▓▓▓] 4/4 (complete)
 Phase 2: [▓▓▓▓] 4/4 (complete)
 Phase 3: [▓▓▓▓▓] 5/5 (complete - VIEW-01, VIEW-02, INRT-05, INRT-06, INRT-07)
 Phase 4: [▓▓▓] 3/3 (complete - INRT-08, VIEW-03, VIEW-04)
-Phase 5: [▱▱▱▱] 0/4
+Phase 5: [▓▓▓▱] 3/4 (CLEN-01, CLEN-02, CLEN-03 complete)
 ```
 
 ---
@@ -42,9 +42,9 @@ Phase 5: [▱▱▱▱] 0/4
 
 ### Velocity
 
-- **Requirements completed:** 16 (INRT-01 to INRT-08, CONS-01 to CONS-04, VIEW-01 to VIEW-04)
-- **Average time per requirement:** 2.9 min (47 min / 16 requirements)
-- **Estimated remaining:** 4 requirements (projected: ~12 minutes)
+- **Requirements completed:** 19 (INRT-01 to INRT-08, CONS-01 to CONS-04, VIEW-01 to VIEW-04, CLEN-01 to CLEN-03)
+- **Average time per requirement:** 2.6 min (50 min / 19 requirements)
+- **Estimated remaining:** 1 requirement (projected: ~3 minutes)
 
 ### Quality
 
@@ -57,7 +57,7 @@ Phase 5: [▱▱▱▱] 0/4
 - **Started:** 2026-02-12
 - **Target completion:** 2026-02-12 (estimated based on 2.9 min/requirement × 4 remaining = ~12 minutes)
 - **Days elapsed:** 0
-- **Phases completed:** 4/5 (80%, Phase 5 remaining)
+- **Phases completed:** 4/5 (80%, Phase 5 plan 1 of 2 done)
 
 ### Plan Execution History
 
@@ -69,6 +69,7 @@ Phase 5: [▱▱▱▱] 0/4
 | 03    | 02   | 4 min    | 3     | 4     | 3 (INRT-05 to INRT-07) | 2026-02-12 |
 | 04    | 01   | 4 min    | 2     | 11    | 1 (INRT-08) | 2026-02-12 |
 | 04    | 02   | 2 min    | 2     | 2     | 2 (VIEW-03, VIEW-04) | 2026-02-12 |
+| 05    | 01   | 3 min    | 2     | 8     | 3 (CLEN-01, CLEN-02, CLEN-03) | 2026-02-13 |
 
 ## Accumulated Context
 
@@ -96,6 +97,7 @@ Phase 5: [▱▱▱▱] 0/4
 | 2026-02-12 | Used only: ['publishers'] for partial reload | Prevent refetching all page props (auth, flash messages) when only publishers list changes | Search requests only fetch/update publishers prop, reducing bandwidth |
 | 2026-02-12 | Implemented 300ms debounce on search input | Reduce server requests while user is still typing | Search requests only fire 300ms after user stops typing |
 | 2026-02-12 | Used preserveState and preserveScroll for table interactions | Maintain table sort order, expanded rows, and scroll position during filtering for better UX | User's table configuration and scroll position remain intact during search |
+| 2026-02-13 | Moved App.css styles to index.css @layer base before deletion | Preserve visual appearance (body background, font) while removing legacy file | Single stylesheet for all global styles |
 
 ### Active Todos
 
@@ -110,7 +112,9 @@ Phase 5: [▱▱▱▱] 0/4
 - [x] Plan Phase 4 (Interactive Features)
 - [x] Execute Phase 4 Plan 1 (Form Submissions)
 - [x] Execute Phase 4 Plan 2 (Partial Reloads and Deferred Props)
-- [ ] Plan Phase 5 (Cleanup and Documentation)
+- [x] Plan Phase 5 (Cleanup and Verification)
+- [x] Execute Phase 5 Plan 1 (Legacy Cleanup)
+- [ ] Execute Phase 5 Plan 2 (Final Verification)
 
 ### Known Blockers
 
@@ -134,19 +138,18 @@ None currently.
 
 ### What Just Happened
 
-Phase 4 Plan 2 (Partial Reloads and Deferred Props) completed successfully. Added server-side search filtering with defer() wrapper for expensive publisher queries, implemented debounced search input with partial reloads using only: ['publishers'], preserved table state and scroll position during filtering, and added loading spinner for deferred data. Requirements VIEW-03 and VIEW-04 delivered. Duration: 2 minutes for 2 requirements. Phase 4 now 100% complete (3/3 requirements: INRT-08, VIEW-03, VIEW-04).
+Phase 5 Plan 1 (Legacy Cleanup) completed successfully. Removed all legacy rendering artifacts: deleted index.html template with json_script embedding, deleted App.tsx/App.css (legacy DOM JSON parsing), removed debug smoke test route and InertiaTest page, cleaned base.html. Moved App.css styles to index.css. CLEN-01, CLEN-02, CLEN-03 requirements delivered. Duration: 3 minutes. Vite build and Django check pass.
 
 ### What's Next
 
-Phase 4 complete. Move to Phase 5 (Cleanup and Documentation). This phase should remove debug routes, add production configuration, document the refactor, and validate all requirements are met.
+Execute Phase 5 Plan 2 (Final Verification). This plan should validate all 20 requirements are met and complete the milestone.
 
 ### Context for Next Session
 
-**Moving to Phase 5:**
-- Goal: Complete cleanup and documentation (4 requirements remaining)
-- Remaining overall: 4 requirements (all in Phase 5)
-- Phase 4 established patterns: Form submissions, partial reloads, deferred props
-- All core Inertia functionality now implemented and tested
+**Phase 5 Plan 2 remaining:**
+- Goal: Final verification of all requirements
+- Remaining: 1 requirement (CLEN-04 or equivalent final verification)
+- Codebase is now clean: no legacy patterns, no debug routes, no dead code
 
 **Completed phases artifacts to reference:**
 - .planning/phases/01-inertia-infrastructure/01-01-SUMMARY.md (Inertia infrastructure setup)
@@ -155,22 +158,20 @@ Phase 4 complete. Move to Phase 5 (Cleanup and Documentation). This phase should
 - .planning/phases/03-core-view-migration/03-02-SUMMARY.md (Shared data and persistent layouts)
 - .planning/phases/04-interactive-features/04-01-SUMMARY.md (Form submissions with useForm)
 - .planning/phases/04-interactive-features/04-02-SUMMARY.md (Partial reloads and deferred props)
-- scrapegrape/scrapegrape/middleware.py (Shared data middleware with errors prop)
-- scrapegrape/frontend/src/Layouts/AppLayout.tsx (Persistent layout pattern)
-- scrapegrape/frontend/src/components/FormField.tsx (Reusable form field component)
-- scrapegrape/publishers/forms.py (Django Forms pattern)
-- scrapegrape/publishers/views.py (Session-based error flashing pattern, defer() wrapper, search filtering)
+- .planning/phases/05-cleanup-verification/05-01-SUMMARY.md (Legacy cleanup)
+- scrapegrape/publishers/views.py (Clean views: table, create, update, bulk_upload only)
+- scrapegrape/scrapegrape/urls.py (Clean URL config: no debug routes)
 
 ---
 
 ### Last Session
 
-- **Date:** 2026-02-12
-- **Stopped at:** Completed Phase 4 Plan 2 (04-02-PLAN.md) - VIEW-03 and VIEW-04 delivered - Phase 4 complete
-- **Next action:** Plan Phase 5 (Cleanup and Documentation)
+- **Date:** 2026-02-13
+- **Stopped at:** Completed Phase 5 Plan 1 (05-01-PLAN.md) - CLEN-01, CLEN-02, CLEN-03 delivered
+- **Next action:** Execute Phase 5 Plan 2 (Final Verification)
 
 ---
 
 *State initialized: 2026-02-12*
-*Last updated: 2026-02-12*
-*Ready for: Phase 5 planning*
+*Last updated: 2026-02-13*
+*Ready for: Phase 5 Plan 2 execution*

@@ -41,11 +41,11 @@
   3. RQ job queue and worker status are visible in Django admin via django-rq
   4. `uv run pytest` runs a passing test suite with factory-created Publisher and ResolutionJob instances
   5. URL sanitizer normalizes variant URLs (http vs https, www vs bare, mixed case, query param order) to identical canonical forms
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 06-01: Redis, RQ worker, and django-rq Docker infrastructure
-- [ ] 06-02: Data models, URL sanitizer, and pytest setup
+- [ ] 06-01-PLAN.md -- Redis, RQ worker, and django-rq Docker infrastructure
+- [ ] 06-02-PLAN.md -- Data models, URL sanitizer, and pytest setup (TDD)
 
 ### Phase 7: Fetch Strategy
 **Goal:** Pipeline steps can fetch any page through a strategy manager that tries curl-cffi first, falls back to Zyte, and remembers what works per publisher

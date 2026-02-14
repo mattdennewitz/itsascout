@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-13)
 
 **Core value:** Paste a URL, get a comprehensive scraping report card with real-time progress as each check completes.
-**Current focus:** Phase 9 in progress (publisher discovery)
+**Current focus:** Phase 9 complete (publisher discovery). Ready for Phase 10.
 
 ## Current Position
 
 Phase: 9 of 11 (Publisher Discovery)
-Plan: 1 of 2 in current phase
-Status: Plan 09-01 complete
-Last activity: 2026-02-14 -- Plan 09-01 complete. robots.txt + sitemap steps with tests, integrated into supervisor.
+Plan: 2 of 2 in current phase
+Status: Phase 09 complete
+Last activity: 2026-02-14 -- Plan 09-02 complete. RSS feed discovery, RSL detection, 8-step pipeline with full frontend display.
 
-Progress: [███████░░░] 60%
+Progress: [████████░░] 70%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7 (v2.0)
+- Total plans completed: 8 (v2.0)
 - Average duration: 3min
-- Total execution time: 0.35 hours
+- Total execution time: 0.42 hours
 
 **By Phase:**
 
@@ -30,10 +30,10 @@ Progress: [███████░░░] 60%
 | 06-infrastructure-models | 2 | 7min | 3.5min |
 | 07-fetch-strategy | 1 | 3min | 3min |
 | 08-core-pipeline-sse | 3 | 7min | 2.3min |
-| 09-publisher-discovery | 1 | 3min | 3min |
+| 09-publisher-discovery | 2 | 7min | 3.5min |
 
 **Recent Trend:**
-- Last 5 plans: 07-01 (3min), 08-01 (3min), 08-02 (2min), 08-03 (2min), 09-01 (3min)
+- Last 5 plans: 08-01 (3min), 08-02 (2min), 08-03 (2min), 09-01 (3min), 09-02 (4min)
 - Trend: stable
 
 *Updated after each plan completion*
@@ -74,6 +74,9 @@ Recent decisions affecting current work:
 - [09-01]: Plain requests.get for robots.txt (no FetchStrategyManager needed for plain text)
 - [09-01]: HEAD-then-GET fallback for sitemap probing (handles servers blocking HEAD)
 - [08-03]: EventSource closes on 'done' event, then reloads via router.reload() for final server props
+- [09-02]: stdlib html.parser.HTMLParser for feed/RSL link extraction (no external dependency)
+- [09-02]: Homepage HTML fetched once and shared between RSS and RSL steps
+- [09-02]: RSL detection best-effort across three sources (robots.txt, HTML link, HTTP Link header)
 
 ### Pending Todos
 
@@ -90,5 +93,5 @@ None currently.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 09-01-PLAN.md (robots.txt + sitemap steps). Ready for 09-02-PLAN.md.
+Stopped at: Completed 09-02-PLAN.md (RSS/RSL steps, 8-step pipeline, full frontend). Phase 09 complete. Ready for Phase 10.
 Resume file: None

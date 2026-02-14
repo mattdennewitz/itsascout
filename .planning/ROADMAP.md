@@ -25,7 +25,7 @@
 - [x] **Phase 6: Infrastructure & Models** -- Redis, RQ, data models, pytest setup, URL sanitization -- completed 2026-02-14
 - [x] **Phase 7: Fetch Strategy** -- curl-cffi with browser TLS fingerprinting and Zyte fallback -- completed 2026-02-14
 - [x] **Phase 8: Core Pipeline & SSE** -- End-to-end URL entry through streaming results with publisher resolution, WAF, and ToS -- completed 2026-02-14
-- [ ] **Phase 9: Publisher Discovery** -- robots.txt, sitemap, RSS, and RSL pipeline steps
+- [x] **Phase 9: Publisher Discovery** -- robots.txt, sitemap, RSS, and RSL pipeline steps -- completed 2026-02-14
 - [ ] **Phase 10: Article Metadata** -- Structured data extraction, paywall detection, and LLM metadata profiling
 - [ ] **Phase 11: Report Card UI** -- Publisher and article report cards with full end-to-end integration test
 
@@ -89,8 +89,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 09-01-PLAN.md -- robots.txt and sitemap discovery pipeline steps (TDD)
-- [ ] 09-02-PLAN.md -- RSS feed discovery, RSL detection, and frontend update (TDD)
+- [x] 09-01-PLAN.md -- robots.txt and sitemap discovery pipeline steps (TDD)
+- [x] 09-02-PLAN.md -- RSS feed discovery, RSL detection, and frontend update (TDD)
 
 ### Phase 10: Article Metadata
 **Goal:** Pipeline extracts structured data from the submitted article URL -- what metadata is available, whether it is paywalled, and an LLM-generated human-readable profile
@@ -135,11 +135,11 @@ Plans:
 | 6. Infrastructure & Models | v2.0 | 2/2 | Complete | 2026-02-14 |
 | 7. Fetch Strategy | v2.0 | 1/1 | Complete | 2026-02-14 |
 | 8. Core Pipeline & SSE | v2.0 | 3/3 | Complete | 2026-02-14 |
-| 9. Publisher Discovery | v2.0 | 0/2 | Not started | - |
+| 9. Publisher Discovery | v2.0 | 2/2 | Complete | 2026-02-14 |
 | 10. Article Metadata | v2.0 | 0/1 | Not started | - |
 | 11. Report Card UI | v2.0 | 0/2 | Not started | - |
 
-**v2.0 Overall:** 23/34 requirements complete (68%)
+**v2.0 Overall:** 27/34 requirements complete (79%)
 
 ### Phase 12: Django Built-in Authentication
 

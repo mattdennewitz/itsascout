@@ -1,6 +1,7 @@
 "use client"
 
 import { createColumnHelper, type ColumnDef } from "@tanstack/react-table"
+import { Link } from "@inertiajs/react"
 
 type ActivityPermission = {
   notes: string;
@@ -74,5 +75,17 @@ export const columns: ColumnDef<Publisher, any>[] = [
   columnHelper.accessor("terms_discovery.terms_of_service_url", {
     header: "Terms URL",
     cell: props => <a href={props.getValue()}>View Terms</a>
+  }),
+  columnHelper.display({
+    id: "actions",
+    header: "",
+    cell: ({ row }) => (
+      <Link
+        href={`/publishers/${row.original.publisher.id}/edit`}
+        className="text-blue-600 hover:underline"
+      >
+        Edit
+      </Link>
+    ),
   }),
 ]

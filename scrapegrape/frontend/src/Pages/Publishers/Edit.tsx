@@ -21,12 +21,14 @@ function Edit({ publisher }: Props) {
 
     const handleSubmit: FormEventHandler = (e) => {
         e.preventDefault()
-        post(`/publishers/${publisher.id}/edit`)
+        post(`/publishers/${publisher.id}/edit`, {
+            forceFormData: true,
+        })
     }
 
     return (
         <div className="container mx-auto py-10">
-            <h1 className="text-2xl font-bold mb-6">Edit Publisher</h1>
+            <h1 className="text-2xl mb-4">Edit Publisher</h1>
 
             <form onSubmit={handleSubmit} className="max-w-md">
                 <FormField label="Name" error={errors.name}>

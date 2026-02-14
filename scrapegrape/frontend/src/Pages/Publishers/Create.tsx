@@ -12,13 +12,14 @@ function Create() {
     const handleSubmit: FormEventHandler = (e) => {
         e.preventDefault()
         post('/publishers/create', {
+            forceFormData: true,
             onSuccess: () => reset()
         })
     }
 
     return (
         <div className="container mx-auto py-10">
-            <h1 className="text-2xl font-bold mb-6">Create Publisher</h1>
+            <h1 className="text-2xl mb-4">Create Publisher</h1>
 
             <form onSubmit={handleSubmit} className="max-w-md">
                 <FormField label="Name" error={errors.name}>

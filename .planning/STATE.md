@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-13)
 
 **Core value:** Paste a URL, get a comprehensive scraping report card with real-time progress as each check completes.
-**Current focus:** Phase 8 complete, ready for Phase 9
+**Current focus:** Phase 9 in progress (publisher discovery)
 
 ## Current Position
 
-Phase: 8 of 11 (Core Pipeline & SSE)
-Plan: 3 of 3 in current phase
-Status: Phase 8 complete (verified)
-Last activity: 2026-02-14 -- Phase 8 complete. All 3 plans executed, verified 6/6 must-haves.
+Phase: 9 of 11 (Publisher Discovery)
+Plan: 1 of 2 in current phase
+Status: Plan 09-01 complete
+Last activity: 2026-02-14 -- Plan 09-01 complete. robots.txt + sitemap steps with tests, integrated into supervisor.
 
-Progress: [██████░░░░] 55%
+Progress: [███████░░░] 60%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6 (v2.0)
+- Total plans completed: 7 (v2.0)
 - Average duration: 3min
-- Total execution time: 0.30 hours
+- Total execution time: 0.35 hours
 
 **By Phase:**
 
@@ -30,10 +30,11 @@ Progress: [██████░░░░] 55%
 | 06-infrastructure-models | 2 | 7min | 3.5min |
 | 07-fetch-strategy | 1 | 3min | 3min |
 | 08-core-pipeline-sse | 3 | 7min | 2.3min |
+| 09-publisher-discovery | 1 | 3min | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 06-02 (4min), 07-01 (3min), 08-01 (3min), 08-02 (2min), 08-03 (2min)
-- Trend: stable/improving
+- Last 5 plans: 07-01 (3min), 08-01 (3min), 08-02 (2min), 08-03 (2min), 09-01 (3min)
+- Trend: stable
 
 *Updated after each plan completion*
 
@@ -68,6 +69,10 @@ Recent decisions affecting current work:
 - [08-03]: Standard HTML form POST to /submit (not Inertia useForm) so redirect is handled as SPA transition
 - [08-03]: CSRF token read from document.cookie (csrftoken) matching Django's default cookie name
 - [08-03]: Completed jobs build stepStatuses from props (waf_result, tos_result) without SSE
+- [09-01]: protego 0.6.0 for robots.txt parsing (Scrapy ecosystem, wildcard support, Sitemap extraction)
+- [09-01]: Content-Type text/html guard treats WAF challenge pages as robots.txt not found
+- [09-01]: Plain requests.get for robots.txt (no FetchStrategyManager needed for plain text)
+- [09-01]: HEAD-then-GET fallback for sitemap probing (handles servers blocking HEAD)
 - [08-03]: EventSource closes on 'done' event, then reloads via router.reload() for final server props
 
 ### Pending Todos
@@ -85,5 +90,5 @@ None currently.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Phase 8 complete and verified. Ready for Phase 9 planning.
+Stopped at: Completed 09-01-PLAN.md (robots.txt + sitemap steps). Ready for 09-02-PLAN.md.
 Resume file: None

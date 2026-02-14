@@ -71,6 +71,33 @@ class TestSubmitUrl:
         assert publisher is not None
         assert publisher.name == "example.com"
 
+    def test_submit_url_stores_root_domain_as_publisher_url(self, client, db, monkeypatch):
+        mock_pipeline = MagicMock()
+        monkeypatch.setattr("publishers.views.run_pipeline", mock_pipeline)
+
+        client.post("/submit", {"url": "https://www.example.com/some/article/path"})
+
+        publisher = Publisher.objects.get(domain="example.com")
+        assert publisher.url == "https://example.com"
+
+    def test_submit_malformed_url_redirects_with_error(self, client, db):
+        response = client.post("/submit", {"url": "http://[invalid]/"})
+
+        assert response.status_code == 302
+        assert response.url == "/"
+        session = client.session
+        assert "errors" in session
+        assert "url" in session["errors"]
+
+    def test_submit_url_without_domain_redirects_with_error(self, client, db):
+        response = client.post("/submit", {"url": "not-a-url"})
+
+        assert response.status_code == 302
+        assert response.url == "/"
+        session = client.session
+        assert "errors" in session
+        assert "url" in session["errors"]
+
 
 # ---------------------------------------------------------------------------
 # TestJobShow

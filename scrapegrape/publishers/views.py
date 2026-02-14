@@ -166,8 +166,16 @@ def submit_url(request):
         request.session["errors"] = {"url": "URL is required."}
         return redirect("/")
 
-    canonical_url = sanitize_url(url)
-    domain = extract_domain(url)
+    try:
+        canonical_url = sanitize_url(url)
+        domain = extract_domain(url)
+    except (ValueError, TypeError):
+        request.session["errors"] = {"url": "Invalid URL."}
+        return redirect("/")
+
+    if not domain:
+        request.session["errors"] = {"url": "Could not extract domain from URL."}
+        return redirect("/")
 
     # Check for existing completed job with same canonical URL
     existing = ResolutionJob.objects.filter(
@@ -177,8 +185,9 @@ def submit_url(request):
         return redirect(f"/jobs/{existing.id}")
 
     # Get or create publisher for this domain
+    publisher_url = f"https://{domain}"
     publisher, _created = Publisher.objects.get_or_create(
-        domain=domain, defaults={"name": domain, "url": canonical_url}
+        domain=domain, defaults={"name": domain, "url": publisher_url}
     )
 
     # Create new resolution job
@@ -219,7 +228,12 @@ def job_show(request, job_id):
 
 
 async def job_stream(request, job_id):
-    """SSE endpoint: stream Redis pub/sub events for a job."""
+    """SSE endpoint: stream Redis pub/sub events for a job.
+
+    To avoid a race condition where the job completes between the status check
+    and the Redis subscription, we subscribe first, then check status. If the
+    job already completed, we send the terminal state and close.
+    """
     import redis.asyncio as aioredis
 
     # Verify job exists
@@ -227,34 +241,6 @@ async def job_stream(request, job_id):
     if not exists:
         return HttpResponseNotFound()
 
-    # If job is already terminal, send current state and close
-    status = await ResolutionJob.objects.filter(id=job_id).values_list(
-        "status", flat=True
-    ).afirst()
-
-    if status in ("completed", "failed"):
-        job_data = await ResolutionJob.objects.filter(id=job_id).values(
-            "status", "waf_result", "tos_result"
-        ).afirst()
-
-        async def terminal_generator():
-            event = json.dumps(
-                {"step": "pipeline", "status": job_data["status"], "data": {
-                    "waf_result": job_data["waf_result"],
-                    "tos_result": job_data["tos_result"],
-                }}
-            )
-            yield f"data: {event}\n\n"
-
-        response = StreamingHttpResponse(
-            streaming_content=terminal_generator(),
-            content_type="text/event-stream",
-        )
-        response["Cache-Control"] = "no-cache"
-        response["X-Accel-Buffering"] = "no"
-        return response
-
-    # Live streaming from Redis pub/sub
     async def event_generator():
         r = aioredis.Redis(
             host=settings.RQ_QUEUES["default"]["HOST"],
@@ -262,7 +248,26 @@ async def job_stream(request, job_id):
         )
         pubsub = r.pubsub()
         try:
+            # Subscribe BEFORE checking status to avoid TOCTOU race.
+            # Any events published after this point will be captured.
             await pubsub.subscribe(f"job:{job_id}:events")
+
+            # Now check if job already completed (handles the fast-finish case)
+            job_data = await ResolutionJob.objects.filter(id=job_id).values(
+                "status", "waf_result", "tos_result"
+            ).afirst()
+
+            if job_data and job_data["status"] in ("completed", "failed"):
+                event = json.dumps(
+                    {"step": "pipeline", "status": job_data["status"], "data": {
+                        "waf_result": job_data["waf_result"],
+                        "tos_result": job_data["tos_result"],
+                    }}
+                )
+                yield f"event: done\ndata: {event}\n\n"
+                return
+
+            # Live streaming from Redis pub/sub
             async for message in pubsub.listen():
                 if message["type"] != "message":
                     continue

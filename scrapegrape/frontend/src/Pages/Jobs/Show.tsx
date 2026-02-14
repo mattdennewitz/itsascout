@@ -141,9 +141,12 @@ function StepCard({ step, event }: { step: typeof PIPELINE_STEPS[number]; event:
     )
 }
 
+const MAX_RETRIES = 5
+
 function Show({ job }: JobProps) {
     const [stepStatuses, setStepStatuses] = useState<Record<string, PipelineEvent>>({})
     const [connected, setConnected] = useState(false)
+    const [connectionFailed, setConnectionFailed] = useState(false)
 
     // Build initial step statuses from completed job props (no SSE needed)
     const initialStatuses = useMemo(() => {
@@ -195,10 +198,13 @@ function Show({ job }: JobProps) {
     useEffect(() => {
         if (job.status === 'completed' || job.status === 'failed') return
 
+        let retryCount = 0
         const es = new EventSource(`/api/jobs/${job.id}/stream`)
 
         es.onopen = () => {
             setConnected(true)
+            setConnectionFailed(false)
+            retryCount = 0
         }
 
         es.onmessage = (event) => {
@@ -220,6 +226,11 @@ function Show({ job }: JobProps) {
 
         es.onerror = () => {
             setConnected(false)
+            retryCount++
+            if (retryCount >= MAX_RETRIES) {
+                es.close()
+                setConnectionFailed(true)
+            }
         }
 
         return () => {
@@ -246,10 +257,22 @@ function Show({ job }: JobProps) {
                     {job.publisher_domain && (
                         <span className="text-gray-400">{job.publisher_domain}</span>
                     )}
-                    {isActive && (
+                    {isActive && !connectionFailed && (
                         <span className="flex items-center gap-1">
                             <span className={`inline-block w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-gray-400'}`} />
                             <span className="text-xs">{connected ? 'Connected' : 'Connecting...'}</span>
+                        </span>
+                    )}
+                    {connectionFailed && (
+                        <span className="flex items-center gap-1">
+                            <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
+                            <span className="text-xs text-red-600">Disconnected</span>
+                            <button
+                                onClick={() => router.reload()}
+                                className="text-xs text-blue-600 hover:underline ml-1"
+                            >
+                                Refresh
+                            </button>
                         </span>
                     )}
                 </div>

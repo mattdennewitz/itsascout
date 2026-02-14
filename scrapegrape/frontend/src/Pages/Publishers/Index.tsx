@@ -17,8 +17,14 @@ function LoadingSpinner() {
     )
 }
 
+function getCsrfToken(): string {
+    const match = document.cookie.match(/csrftoken=([^;]+)/)
+    return match ? match[1] : ''
+}
+
 function Index({ publishers }: Props) {
     const { url } = usePage()
+    const csrfToken = getCsrfToken()
     const [search, setSearch] = useState(() => {
         const params = new URLSearchParams(url.split('?')[1])
         return params.get('search') || ''
@@ -47,6 +53,28 @@ function Index({ publishers }: Props) {
 
     return (
         <div className="container mx-auto py-10">
+            <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
+                <h2 className="text-lg font-semibold text-gray-900 mb-2">Analyze a URL</h2>
+                <p className="text-sm text-gray-500 mb-4">
+                    Paste a URL to get a comprehensive scraping report card
+                </p>
+                <form action="/submit" method="POST" className="flex gap-3">
+                    <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
+                    <input
+                        type="url"
+                        name="url"
+                        placeholder="https://example.com/article"
+                        required
+                        className="flex-1 rounded-md border border-gray-300 px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    />
+                    <button
+                        type="submit"
+                        className="bg-blue-600 text-white px-6 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
+                    >
+                        Analyze
+                    </button>
+                </form>
+            </div>
             <div className="flex justify-between items-center mb-6">
                 <h1 className="text-2xl">Publishers</h1>
                 <div className="flex gap-2">

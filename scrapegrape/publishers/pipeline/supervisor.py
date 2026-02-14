@@ -7,6 +7,8 @@ from loguru import logger
 from publishers.models import ResolutionJob
 from publishers.pipeline.events import publish_step_event
 from publishers.pipeline.steps import (
+    run_robots_step,
+    run_sitemap_step,
     run_tos_discovery_step,
     run_tos_evaluation_step,
     run_waf_step,
@@ -52,6 +54,8 @@ def run_pipeline(job_id: str):
             publish_step_event(
                 job_id, "tos_evaluation", "skipped", {"reason": "fresh"}
             )
+            publish_step_event(job_id, "robots", "skipped", {"reason": "fresh"})
+            publish_step_event(job_id, "sitemap", "skipped", {"reason": "fresh"})
         else:
             # Step 1: WAF check
             publish_step_event(job_id, "waf", "started")
@@ -99,6 +103,30 @@ def run_pipeline(job_id: str):
             if permissions is not None:
                 publisher.tos_permissions = permissions
                 publisher.save(update_fields=["tos_permissions"])
+
+            # Step 4: robots.txt + URL allowance
+            publish_step_event(job_id, "robots", "started")
+            robots_result = run_robots_step(publisher, resolution_job.canonical_url)
+            resolution_job.robots_result = robots_result
+            resolution_job.save(update_fields=["robots_result"])
+            publish_step_event(job_id, "robots", "completed", robots_result)
+
+            # Update publisher flat fields
+            publisher.robots_txt_found = robots_result.get("robots_found", False)
+            publisher.robots_txt_url_allowed = robots_result.get("url_allowed")
+            publisher.save(
+                update_fields=["robots_txt_found", "robots_txt_url_allowed"]
+            )
+
+            # Step 5: Sitemap discovery
+            publish_step_event(job_id, "sitemap", "started")
+            sitemap_result = run_sitemap_step(publisher, robots_result)
+            resolution_job.sitemap_result = sitemap_result
+            resolution_job.save(update_fields=["sitemap_result"])
+            publish_step_event(job_id, "sitemap", "completed", sitemap_result)
+
+            publisher.sitemap_urls = sitemap_result.get("sitemap_urls", [])
+            publisher.save(update_fields=["sitemap_urls"])
 
             # Update freshness timestamp
             publisher.last_checked_at = timezone.now()

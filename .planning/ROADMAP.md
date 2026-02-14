@@ -141,6 +141,15 @@ Plans:
 
 **v2.0 Overall:** 23/34 requirements complete (68%)
 
+### Phase 12: Django Built-in Authentication
+
+**Goal:** [To be planned]
+**Depends on:** Phase 11
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 12 to break down)
+
 ---
 
 *Roadmap created: 2026-02-12*

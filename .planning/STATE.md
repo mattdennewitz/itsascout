@@ -74,6 +74,10 @@ Recent decisions affecting current work:
 
 None yet.
 
+### Roadmap Evolution
+
+- Phase 12 added: Django Built-in Authentication
+
 ### Blockers/Concerns
 
 None currently.

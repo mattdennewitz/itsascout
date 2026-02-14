@@ -177,9 +177,9 @@ def submit_url(request):
         request.session["errors"] = {"url": "Could not extract domain from URL."}
         return redirect("/")
 
-    # Check for existing completed job with same canonical URL
+    # Check for existing non-failed job with same canonical URL
     existing = ResolutionJob.objects.filter(
-        canonical_url=canonical_url, status="completed"
+        canonical_url=canonical_url, status__in=("pending", "running", "completed")
     ).first()
     if existing:
         return redirect(f"/jobs/{existing.id}")
@@ -214,15 +214,17 @@ def job_show(request, job_id):
         request,
         "Jobs/Show",
         props={
-            "id": str(job.id),
-            "status": job.status,
-            "canonical_url": job.canonical_url,
-            "submitted_url": job.submitted_url,
-            "publisher_name": job.publisher.name,
-            "publisher_domain": job.publisher.domain,
-            "waf_result": job.waf_result,
-            "tos_result": job.tos_result,
-            "created_at": job.created_at.isoformat(),
+            "job": {
+                "id": str(job.id),
+                "status": job.status,
+                "canonical_url": job.canonical_url,
+                "submitted_url": job.submitted_url,
+                "publisher_name": job.publisher.name,
+                "publisher_domain": job.publisher.domain,
+                "waf_result": job.waf_result,
+                "tos_result": job.tos_result,
+                "created_at": job.created_at.isoformat(),
+            },
         },
     )
 
@@ -242,12 +244,15 @@ async def job_stream(request, job_id):
         return HttpResponseNotFound()
 
     async def event_generator():
-        r = aioredis.Redis(
-            host=settings.RQ_QUEUES["default"]["HOST"],
-            port=settings.RQ_QUEUES["default"]["PORT"],
-        )
-        pubsub = r.pubsub()
+        r = None
+        pubsub = None
         try:
+            r = aioredis.Redis(
+                host=settings.RQ_QUEUES["default"]["HOST"],
+                port=settings.RQ_QUEUES["default"]["PORT"],
+            )
+            pubsub = r.pubsub()
+
             # Subscribe BEFORE checking status to avoid TOCTOU race.
             # Any events published after this point will be captured.
             await pubsub.subscribe(f"job:{job_id}:events")
@@ -287,9 +292,11 @@ async def job_stream(request, job_id):
                     pass
                 yield f"data: {data}\n\n"
         finally:
-            await pubsub.unsubscribe(f"job:{job_id}:events")
-            await pubsub.aclose()
-            await r.aclose()
+            if pubsub:
+                await pubsub.unsubscribe(f"job:{job_id}:events")
+                await pubsub.aclose()
+            if r:
+                await r.aclose()
 
     response = StreamingHttpResponse(
         streaming_content=event_generator(),

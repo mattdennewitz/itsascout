@@ -760,3 +760,198 @@ class TestRunSitemapStep:
         result = run_sitemap_step(publisher, robots_result)
         assert "https://example.com/sitemap.xml" in result["sitemap_urls"]
         assert result["source"] == "robots.txt"
+
+
+# ---------------------------------------------------------------------------
+# TestFeedLinkParser
+# ---------------------------------------------------------------------------
+
+
+class TestFeedLinkParser:
+    def test_finds_rss_feed(self):
+        """FeedLinkParser finds <link rel="alternate" type="application/rss+xml">."""
+        from publishers.pipeline.steps import FeedLinkParser
+
+        parser = FeedLinkParser()
+        parser.feed('<html><head><link rel="alternate" type="application/rss+xml" href="/feed"></head></html>')
+        assert len(parser.feeds) == 1
+        assert parser.feeds[0]["url"] == "/feed"
+        assert parser.feeds[0]["type"] == "application/rss+xml"
+
+    def test_finds_atom_feed(self):
+        """FeedLinkParser finds atom+xml type."""
+        from publishers.pipeline.steps import FeedLinkParser
+
+        parser = FeedLinkParser()
+        parser.feed('<html><head><link rel="alternate" type="application/atom+xml" href="/atom.xml" title="Atom Feed"></head></html>')
+        assert len(parser.feeds) == 1
+        assert parser.feeds[0]["type"] == "application/atom+xml"
+
+    def test_ignores_non_feed_links(self):
+        """FeedLinkParser ignores <link rel="stylesheet">."""
+        from publishers.pipeline.steps import FeedLinkParser
+
+        parser = FeedLinkParser()
+        parser.feed('<html><head><link rel="stylesheet" href="/style.css"></head></html>')
+        assert len(parser.feeds) == 0
+
+    def test_self_closing_link_tag(self):
+        """FeedLinkParser handles self-closing <link ... />."""
+        from publishers.pipeline.steps import FeedLinkParser
+
+        parser = FeedLinkParser()
+        parser.feed('<html><head><link rel="alternate" type="application/rss+xml" href="/feed" /></head></html>')
+        assert len(parser.feeds) == 1
+
+
+# ---------------------------------------------------------------------------
+# TestRunRssStep
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestRunRssStep:
+    def test_rss_feeds_discovered(self):
+        """run_rss_step discovers RSS feed from HTML link tag."""
+        from publishers.pipeline.steps import run_rss_step
+
+        publisher = PublisherFactory(domain="example.com")
+        html = '<html><head><link rel="alternate" type="application/rss+xml" href="https://example.com/feed"></head></html>'
+        result = run_rss_step(publisher, html)
+        assert result["count"] == 1
+        assert result["feeds"][0]["url"] == "https://example.com/feed"
+
+    def test_relative_url_resolved(self):
+        """run_rss_step resolves relative feed URLs to absolute."""
+        from publishers.pipeline.steps import run_rss_step
+
+        publisher = PublisherFactory(domain="example.com")
+        html = '<html><head><link rel="alternate" type="application/rss+xml" href="/feed/rss"></head></html>'
+        result = run_rss_step(publisher, html)
+        assert result["feeds"][0]["url"] == "https://example.com/feed/rss"
+
+    def test_empty_html(self):
+        """run_rss_step returns count=0 and error for empty HTML."""
+        from publishers.pipeline.steps import run_rss_step
+
+        publisher = PublisherFactory(domain="example.com")
+        result = run_rss_step(publisher, "")
+        assert result["count"] == 0
+        assert "error" in result
+
+    def test_no_feeds_in_html(self):
+        """run_rss_step returns count=0 for HTML without feed links."""
+        from publishers.pipeline.steps import run_rss_step
+
+        publisher = PublisherFactory(domain="example.com")
+        html = "<html><head><title>Test</title></head><body></body></html>"
+        result = run_rss_step(publisher, html)
+        assert result["count"] == 0
+        assert len(result["feeds"]) == 0
+
+    def test_multiple_feeds(self):
+        """run_rss_step finds both RSS and Atom feeds."""
+        from publishers.pipeline.steps import run_rss_step
+
+        publisher = PublisherFactory(domain="example.com")
+        html = (
+            '<html><head>'
+            '<link rel="alternate" type="application/rss+xml" href="/rss">'
+            '<link rel="alternate" type="application/atom+xml" href="/atom">'
+            '</head></html>'
+        )
+        result = run_rss_step(publisher, html)
+        assert result["count"] == 2
+
+
+# ---------------------------------------------------------------------------
+# TestRSLLinkParser
+# ---------------------------------------------------------------------------
+
+
+class TestRSLLinkParser:
+    def test_finds_rsl_link(self):
+        """RSLLinkParser finds <link rel="license" type="application/rsl+xml">."""
+        from publishers.pipeline.steps import RSLLinkParser
+
+        parser = RSLLinkParser()
+        parser.feed('<html><head><link rel="license" type="application/rsl+xml" href="https://example.com/license.xml"></head></html>')
+        assert len(parser.urls) == 1
+        assert parser.urls[0] == "https://example.com/license.xml"
+
+    def test_ignores_non_rsl_license(self):
+        """RSLLinkParser ignores <link rel="license" type="text/html">."""
+        from publishers.pipeline.steps import RSLLinkParser
+
+        parser = RSLLinkParser()
+        parser.feed('<html><head><link rel="license" type="text/html" href="/license.html"></head></html>')
+        assert len(parser.urls) == 0
+
+
+# ---------------------------------------------------------------------------
+# TestRunRslStep
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestRunRslStep:
+    def test_rsl_from_robots_license(self):
+        """run_rsl_step detects RSL from robots.txt License directive."""
+        from publishers.pipeline.steps import run_rsl_step
+
+        publisher = PublisherFactory(domain="example.com")
+        robots_result = {"license_directives": ["https://example.com/license.xml"]}
+        result = run_rsl_step(publisher, robots_result, "")
+        assert result["rsl_detected"] is True
+        assert result["indicators"][0]["source"] == "robots.txt"
+
+    def test_rsl_from_html_link(self):
+        """run_rsl_step detects RSL from HTML link tag."""
+        from publishers.pipeline.steps import run_rsl_step
+
+        publisher = PublisherFactory(domain="example.com")
+        html = '<html><head><link rel="license" type="application/rsl+xml" href="https://example.com/license.xml"></head></html>'
+        result = run_rsl_step(publisher, {}, html)
+        assert result["rsl_detected"] is True
+        assert result["indicators"][0]["source"] == "html_link"
+
+    def test_rsl_from_http_header(self):
+        """run_rsl_step detects RSL from HTTP Link header."""
+        from publishers.pipeline.steps import run_rsl_step
+
+        publisher = PublisherFactory(domain="example.com")
+        headers = {"Link": '<https://example.com/license.xml>; rel="license"; type="application/rsl+xml"'}
+        result = run_rsl_step(publisher, {}, "", headers)
+        assert result["rsl_detected"] is True
+        assert result["indicators"][0]["source"] == "http_header"
+
+    def test_rsl_all_three_sources(self):
+        """run_rsl_step finds indicators from all three sources."""
+        from publishers.pipeline.steps import run_rsl_step
+
+        publisher = PublisherFactory(domain="example.com")
+        robots_result = {"license_directives": ["https://example.com/robots-license.xml"]}
+        html = '<html><head><link rel="license" type="application/rsl+xml" href="https://example.com/html-license.xml"></head></html>'
+        headers = {"Link": '<https://example.com/header-license.xml>; rel="license"; type="application/rsl+xml"'}
+        result = run_rsl_step(publisher, robots_result, html, headers)
+        assert result["rsl_detected"] is True
+        assert result["count"] == 3
+
+    def test_rsl_not_detected(self):
+        """run_rsl_step returns rsl_detected=False when no indicators."""
+        from publishers.pipeline.steps import run_rsl_step
+
+        publisher = PublisherFactory(domain="example.com")
+        result = run_rsl_step(publisher, {}, "<html></html>")
+        assert result["rsl_detected"] is False
+        assert result["count"] == 0
+
+    def test_rsl_empty_html_with_robots_license(self):
+        """run_rsl_step detects RSL from robots.txt even with empty HTML."""
+        from publishers.pipeline.steps import run_rsl_step
+
+        publisher = PublisherFactory(domain="example.com")
+        robots_result = {"license_directives": ["https://example.com/license.xml"]}
+        result = run_rsl_step(publisher, robots_result, "")
+        assert result["rsl_detected"] is True
+        assert result["indicators"][0]["source"] == "robots.txt"

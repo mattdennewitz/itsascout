@@ -8,6 +8,7 @@ tests can monkeypatch the module-level references.
 from __future__ import annotations
 
 import re
+from html.parser import HTMLParser
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin
 
@@ -232,4 +233,134 @@ def run_sitemap_step(publisher: Publisher, robots_result: dict) -> dict:
         "sitemap_urls": sorted(found_sitemaps),
         "source": source,
         "count": len(found_sitemaps),
+    }
+
+
+# ---------------------------------------------------------------------------
+# RSS feed discovery step
+# ---------------------------------------------------------------------------
+
+_FEED_MIME_TYPES = {
+    "application/rss+xml",
+    "application/atom+xml",
+    "application/xml",
+    "text/xml",
+}
+
+
+class FeedLinkParser(HTMLParser):
+    """Extract <link rel="alternate"> tags pointing to RSS/Atom feeds."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.feeds: list[dict] = []
+
+    def _handle_link(self, attrs: list[tuple[str, str | None]]) -> None:
+        attr_dict = {k.lower(): (v or "") for k, v in attrs}
+        rel = attr_dict.get("rel", "")
+        link_type = attr_dict.get("type", "")
+        href = attr_dict.get("href", "")
+        if "alternate" in rel and link_type in _FEED_MIME_TYPES and href:
+            self.feeds.append({
+                "url": href,
+                "type": link_type,
+                "title": attr_dict.get("title", ""),
+            })
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "link":
+            self._handle_link(attrs)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "link":
+            self._handle_link(attrs)
+
+
+def run_rss_step(publisher: Publisher, homepage_html: str) -> dict:
+    """Discover RSS/Atom feed URLs from homepage HTML <link> tags."""
+    if not homepage_html:
+        return {"feeds": [], "count": 0, "error": "homepage fetch failed"}
+
+    parser = FeedLinkParser()
+    try:
+        parser.feed(homepage_html)
+    except Exception:
+        return {"feeds": [], "count": 0, "error": "HTML parse error"}
+
+    base_url = f"https://{publisher.domain}/"
+    feeds = []
+    for feed in parser.feeds:
+        feeds.append({
+            "url": urljoin(base_url, feed["url"]),
+            "type": feed["type"],
+            "title": feed["title"],
+        })
+
+    return {"feeds": feeds, "count": len(feeds)}
+
+
+# ---------------------------------------------------------------------------
+# RSL detection step
+# ---------------------------------------------------------------------------
+
+
+class RSLLinkParser(HTMLParser):
+    """Extract <link rel="license" type="application/rsl+xml"> tags."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.urls: list[str] = []
+
+    def _handle_link(self, attrs: list[tuple[str, str | None]]) -> None:
+        attr_dict = {k.lower(): (v or "") for k, v in attrs}
+        rel = attr_dict.get("rel", "")
+        link_type = attr_dict.get("type", "")
+        href = attr_dict.get("href", "")
+        if "license" in rel and "application/rsl+xml" in link_type and href:
+            self.urls.append(href)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "link":
+            self._handle_link(attrs)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "link":
+            self._handle_link(attrs)
+
+
+def run_rsl_step(
+    publisher: Publisher,
+    robots_result: dict,
+    homepage_html: str,
+    homepage_headers: dict | None = None,
+) -> dict:
+    """Detect RSL licensing indicators from robots.txt, HTML, and HTTP headers."""
+    indicators: list[dict] = []
+
+    # Source 1: License directives from robots.txt
+    for url in robots_result.get("license_directives", []):
+        indicators.append({"source": "robots.txt", "url": url})
+
+    # Source 2: <link rel="license" type="application/rsl+xml"> in HTML
+    if homepage_html:
+        parser = RSLLinkParser()
+        try:
+            parser.feed(homepage_html)
+        except Exception:
+            pass
+        for url in parser.urls:
+            indicators.append({"source": "html_link", "url": url})
+
+    # Source 3: Link HTTP header with rel="license" and application/rsl+xml
+    if homepage_headers:
+        link_header = homepage_headers.get("Link", homepage_headers.get("link", ""))
+        if "application/rsl+xml" in link_header and 'rel="license"' in link_header:
+            match = re.search(r"<([^>]+)>", link_header)
+            if match:
+                indicators.append({"source": "http_header", "url": match.group(1)})
+
+    return {
+        "rsl_detected": len(indicators) > 0,
+        "indicators": indicators,
+        "count": len(indicators),
     }

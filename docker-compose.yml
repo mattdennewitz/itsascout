@@ -15,6 +15,18 @@ services:
       timeout: 3s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   django:
     build: .
     volumes:
@@ -24,10 +36,28 @@ services:
     env_file: scrapegrape/.env
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/scrapegrape
+      REDIS_HOST: redis
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     command: uv run scrapegrape/manage.py runserver 0.0.0.0:8000
+
+  worker:
+    build: .
+    volumes:
+      - .:/app
+    env_file: scrapegrape/.env
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/scrapegrape
+      REDIS_HOST: redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uv run scrapegrape/manage.py rqworker default
 
   vite:
     image: node:24-slim
@@ -41,4 +71,5 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
   vite_node_modules:

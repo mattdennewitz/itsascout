@@ -89,7 +89,7 @@ def create(request):
         if form.is_valid():
             publisher = form.save()
             # Enqueue background analysis task
-            analyze_url.enqueue(publisher.url)
+            analyze_url.delay(publisher.url)
             request.session['success'] = f'Publisher "{publisher.name}" created and analysis queued!'
             return redirect('/')
         else:
@@ -137,7 +137,7 @@ def bulk_upload(request):
             count = 0
             for row in reader:
                 if 'URL' in row and row['URL']:
-                    analyze_url.enqueue(row['URL'])
+                    analyze_url.delay(row['URL'])
                     count += 1
 
             request.session['success'] = f'{count} URLs queued for analysis'

@@ -10,28 +10,29 @@ See: .planning/PROJECT.md (updated 2026-02-13)
 ## Current Position
 
 Phase: 7 of 11 (Fetch Strategy)
-Plan: 0 of 1 in current phase
-Status: Ready to plan
-Last activity: 2026-02-14 -- Phase 6 complete (2/2 plans, verified, approved)
+Plan: 1 of 1 in current phase
+Status: Phase 7 complete
+Last activity: 2026-02-14 -- Phase 7 plan 1 complete (fetch strategy manager with TDD)
 
-Progress: [██░░░░░░░░] 18%
+Progress: [███░░░░░░░] 27%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2 (v2.0)
-- Average duration: 3.5min
-- Total execution time: 0.12 hours
+- Total plans completed: 3 (v2.0)
+- Average duration: 3.3min
+- Total execution time: 0.17 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 06-infrastructure-models | 2 | 7min | 3.5min |
+| 07-fetch-strategy | 1 | 3min | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 06-01 (3min), 06-02 (4min)
-- Trend: --
+- Last 5 plans: 06-01 (3min), 06-02 (4min), 07-01 (3min)
+- Trend: stable
 
 *Updated after each plan completion*
 
@@ -52,6 +53,10 @@ Recent decisions affecting current work:
 - [06-02]: 3-step migration pattern (add, populate, add unique) for domain field on existing data
 - [06-02]: Factory get_or_create on domain to prevent duplicate publishers in tests
 - [06-02]: 28 tracking params in URL sanitizer denylist covering all major ad/analytics platforms
+- [07-01]: curl-cffi impersonate="chrome" (latest) as default TLS fingerprint target
+- [07-01]: WAF detection via 6 content signatures + 403 status -- no body-length heuristic
+- [07-01]: Publisher.fetch_strategy saved only on change to avoid unnecessary DB writes
+- [07-01]: ZyteFetcher reads ZYTE_API_KEY at call time (not init) for per-request validation
 
 ### Pending Todos
 
@@ -64,5 +69,5 @@ None currently.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Phase 6 complete and verified. Ready for Phase 7 planning.
+Stopped at: Completed 07-01-PLAN.md. Phase 7 complete (1/1 plans). Ready for Phase 8 planning.
 Resume file: None

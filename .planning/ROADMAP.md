@@ -55,10 +55,10 @@ Plans:
   1. Fetch strategy manager retrieves a page using curl-cffi with browser TLS impersonation as the default path
   2. When curl-cffi fails (connection error, WAF block), fetch automatically falls back to Zyte proxy API and succeeds
   3. After a successful fetch, the working strategy is saved on the Publisher record and used for subsequent fetches against the same publisher
-**Plans:** TBD
+**Plans:** 1 plan
 
 Plans:
-- [ ] 07-01: Fetch strategy manager with curl-cffi, Zyte fallback, and per-publisher memory
+- [ ] 07-01-PLAN.md -- Fetch strategy manager with curl-cffi, Zyte fallback, and per-publisher memory (TDD)
 
 ### Phase 8: Core Pipeline & SSE
 **Goal:** User can paste a URL and watch real-time progress as the pipeline resolves the publisher, checks WAF, and evaluates ToS -- with results at a shareable URL
@@ -133,7 +133,7 @@ Plans:
 | 4. Interactive Features | v1.0 | 2/2 | Complete | 2026-02-12 |
 | 5. Cleanup & Verification | v1.0 | 2/2 | Complete | 2026-02-13 |
 | 6. Infrastructure & Models | v2.0 | 2/2 | Complete | 2026-02-14 |
-| 7. Fetch Strategy | v2.0 | 0/1 | Not started | - |
+| 7. Fetch Strategy | v2.0 | 0/1 | Planned | - |
 | 8. Core Pipeline & SSE | v2.0 | 0/3 | Not started | - |
 | 9. Publisher Discovery | v2.0 | 0/2 | Not started | - |
 | 10. Article Metadata | v2.0 | 0/1 | Not started | - |

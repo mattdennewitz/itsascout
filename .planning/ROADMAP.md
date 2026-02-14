@@ -23,7 +23,7 @@
 **Milestone Goal:** Build the end-to-end URL analysis workflow with streaming progress, durable publisher intelligence, and a report card UI.
 
 - [x] **Phase 6: Infrastructure & Models** -- Redis, RQ, data models, pytest setup, URL sanitization -- completed 2026-02-14
-- [ ] **Phase 7: Fetch Strategy** -- curl-cffi with browser TLS fingerprinting and Zyte fallback
+- [x] **Phase 7: Fetch Strategy** -- curl-cffi with browser TLS fingerprinting and Zyte fallback -- completed 2026-02-14
 - [ ] **Phase 8: Core Pipeline & SSE** -- End-to-end URL entry through streaming results with publisher resolution, WAF, and ToS
 - [ ] **Phase 9: Publisher Discovery** -- robots.txt, sitemap, RSS, and RSL pipeline steps
 - [ ] **Phase 10: Article Metadata** -- Structured data extraction, paywall detection, and LLM metadata profiling
@@ -58,7 +58,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] 07-01-PLAN.md -- Fetch strategy manager with curl-cffi, Zyte fallback, and per-publisher memory (TDD)
+- [x] 07-01-PLAN.md -- Fetch strategy manager with curl-cffi, Zyte fallback, and per-publisher memory (TDD)
 
 ### Phase 8: Core Pipeline & SSE
 **Goal:** User can paste a URL and watch real-time progress as the pipeline resolves the publisher, checks WAF, and evaluates ToS -- with results at a shareable URL
@@ -133,13 +133,13 @@ Plans:
 | 4. Interactive Features | v1.0 | 2/2 | Complete | 2026-02-12 |
 | 5. Cleanup & Verification | v1.0 | 2/2 | Complete | 2026-02-13 |
 | 6. Infrastructure & Models | v2.0 | 2/2 | Complete | 2026-02-14 |
-| 7. Fetch Strategy | v2.0 | 0/1 | Planned | - |
+| 7. Fetch Strategy | v2.0 | 1/1 | Complete | 2026-02-14 |
 | 8. Core Pipeline & SSE | v2.0 | 0/3 | Not started | - |
 | 9. Publisher Discovery | v2.0 | 0/2 | Not started | - |
 | 10. Article Metadata | v2.0 | 0/1 | Not started | - |
 | 11. Report Card UI | v2.0 | 0/2 | Not started | - |
 
-**v2.0 Overall:** 6/34 requirements complete (18%)
+**v2.0 Overall:** 9/34 requirements complete (26%)
 
 ---
 

@@ -70,12 +70,12 @@ Plans:
   3. Submitting a duplicate URL redirects to the existing job results instead of re-running the pipeline
   4. Pipeline skips publisher-level steps when the publisher was analyzed within the configured freshness TTL
   5. Existing publisher table and admin actions continue working unchanged
-**Plans:** TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 08-01: URL entry, ResolutionJob creation, and SSE endpoint
-- [ ] 08-02: Pipeline supervisor job with publisher resolution, WAF, and ToS steps
-- [ ] 08-03: Streaming results page (Jobs/Show.tsx) with EventSource and progress UI
+- [ ] 08-01-PLAN.md -- Pipeline supervisor with WAF and ToS steps (TDD)
+- [ ] 08-02-PLAN.md -- Daphne ASGI, URL submission, SSE endpoint, and job views
+- [ ] 08-03-PLAN.md -- Jobs/Show.tsx with EventSource and homepage URL input
 
 ### Phase 9: Publisher Discovery
 **Goal:** Pipeline discovers and caches publisher crawling policy signals -- robots.txt rules, sitemap locations, RSS feeds, and RSL licensing
@@ -134,7 +134,7 @@ Plans:
 | 5. Cleanup & Verification | v1.0 | 2/2 | Complete | 2026-02-13 |
 | 6. Infrastructure & Models | v2.0 | 2/2 | Complete | 2026-02-14 |
 | 7. Fetch Strategy | v2.0 | 1/1 | Complete | 2026-02-14 |
-| 8. Core Pipeline & SSE | v2.0 | 0/3 | Not started | - |
+| 8. Core Pipeline & SSE | v2.0 | 0/3 | Planned | - |
 | 9. Publisher Discovery | v2.0 | 0/2 | Not started | - |
 | 10. Article Metadata | v2.0 | 0/1 | Not started | - |
 | 11. Report Card UI | v2.0 | 0/2 | Not started | - |

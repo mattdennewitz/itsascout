@@ -22,7 +22,7 @@
 
 **Milestone Goal:** Build the end-to-end URL analysis workflow with streaming progress, durable publisher intelligence, and a report card UI.
 
-- [ ] **Phase 6: Infrastructure & Models** -- Redis, RQ, data models, pytest setup, URL sanitization
+- [x] **Phase 6: Infrastructure & Models** -- Redis, RQ, data models, pytest setup, URL sanitization -- completed 2026-02-14
 - [ ] **Phase 7: Fetch Strategy** -- curl-cffi with browser TLS fingerprinting and Zyte fallback
 - [ ] **Phase 8: Core Pipeline & SSE** -- End-to-end URL entry through streaming results with publisher resolution, WAF, and ToS
 - [ ] **Phase 9: Publisher Discovery** -- robots.txt, sitemap, RSS, and RSL pipeline steps
@@ -44,8 +44,8 @@
 **Plans:** 2 plans
 
 Plans:
-- [ ] 06-01-PLAN.md -- Redis, RQ worker, and django-rq Docker infrastructure
-- [ ] 06-02-PLAN.md -- Data models, URL sanitizer, and pytest setup (TDD)
+- [x] 06-01-PLAN.md -- Redis, RQ worker, and django-rq Docker infrastructure
+- [x] 06-02-PLAN.md -- Data models, URL sanitizer, and pytest setup (TDD)
 
 ### Phase 7: Fetch Strategy
 **Goal:** Pipeline steps can fetch any page through a strategy manager that tries curl-cffi first, falls back to Zyte, and remembers what works per publisher
@@ -132,14 +132,14 @@ Plans:
 | 3. Core View Migration | v1.0 | 2/2 | Complete | 2026-02-12 |
 | 4. Interactive Features | v1.0 | 2/2 | Complete | 2026-02-12 |
 | 5. Cleanup & Verification | v1.0 | 2/2 | Complete | 2026-02-13 |
-| 6. Infrastructure & Models | v2.0 | 0/2 | Not started | - |
+| 6. Infrastructure & Models | v2.0 | 2/2 | Complete | 2026-02-14 |
 | 7. Fetch Strategy | v2.0 | 0/1 | Not started | - |
 | 8. Core Pipeline & SSE | v2.0 | 0/3 | Not started | - |
 | 9. Publisher Discovery | v2.0 | 0/2 | Not started | - |
 | 10. Article Metadata | v2.0 | 0/1 | Not started | - |
 | 11. Report Card UI | v2.0 | 0/2 | Not started | - |
 
-**v2.0 Overall:** 0/34 requirements complete (0%)
+**v2.0 Overall:** 6/34 requirements complete (18%)
 
 ---
 

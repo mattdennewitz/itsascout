@@ -1,6 +1,4 @@
 import { useForm, Link } from '@inertiajs/react'
-import { usePapaParse } from 'react-papaparse'
-import { useState } from 'react'
 import type { ReactNode, FormEventHandler, ChangeEvent } from 'react'
 import AppLayout from '@/Layouts/AppLayout'
 import { FormField } from '@/components/FormField'
@@ -13,64 +11,24 @@ function BulkUpload() {
         csv_file: null
     })
 
-    const { readString } = usePapaParse()
-    const [csvError, setCsvError] = useState<string | null>(null)
-    const [fileName, setFileName] = useState<string | null>(null)
-
     const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0]
-        if (!file) {
-            setData('csv_file', null)
-            setFileName(null)
-            setCsvError(null)
-            return
-        }
-
-        // Client-side validation: check if CSV has 'URL' column
-        const reader = new FileReader()
-        reader.onload = (event) => {
-            const csvText = event.target?.result as string
-            readString(csvText, {
-                header: true,
-                complete: (results) => {
-                    const headers = results.meta.fields || []
-                    if (!headers.includes('URL')) {
-                        setCsvError('CSV file must have a "URL" column header')
-                        setData('csv_file', null)
-                        setFileName(null)
-                    } else {
-                        setCsvError(null)
-                        setData('csv_file', file)
-                        setFileName(file.name)
-                    }
-                },
-                error: () => {
-                    setCsvError('Failed to parse CSV file')
-                    setData('csv_file', null)
-                    setFileName(null)
-                }
-            })
-        }
-        reader.readAsText(file)
+        const file = e.target.files?.[0] || null
+        setData('csv_file', file)
     }
 
     const handleSubmit: FormEventHandler = (e) => {
         e.preventDefault()
         post('/publishers/bulk-upload', {
-            onSuccess: () => {
-                setData('csv_file', null)
-                setFileName(null)
-                setCsvError(null)
-            }
+            onSuccess: () => setData('csv_file', null)
         })
     }
 
     return (
         <div className="container mx-auto py-10">
-            <h1 className="text-2xl font-bold mb-6">Bulk Upload Publishers</h1>
+            <h1 className="text-2xl mb-4">Bulk Upload Publishers</h1>
 
             <form onSubmit={handleSubmit} className="max-w-md">
-                <FormField label="CSV File" error={csvError || errors.csv_file}>
+                <FormField label="CSV File" error={errors.csv_file}>
                     <input
                         type="file"
                         accept=".csv"
@@ -78,11 +36,6 @@ function BulkUpload() {
                         className="w-full px-4 py-2 border rounded"
                         disabled={processing}
                     />
-                    {fileName && (
-                        <p className="text-sm text-gray-600 mt-1">
-                            Selected: {fileName}
-                        </p>
-                    )}
                 </FormField>
 
                 <p className="text-sm text-gray-600 mb-4">
@@ -104,7 +57,7 @@ function BulkUpload() {
                 <div className="flex gap-2">
                     <button
                         type="submit"
-                        disabled={processing || !data.csv_file || csvError !== null}
+                        disabled={processing || !data.csv_file}
                         className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
                     >
                         {processing ? 'Uploading...' : 'Upload CSV'}
@@ -122,7 +75,6 @@ function BulkUpload() {
     )
 }
 
-// Persistent layout: AppLayout instance preserved across page navigations
 BulkUpload.layout = (page: ReactNode) => <AppLayout>{page}</AppLayout>
 
 export default BulkUpload

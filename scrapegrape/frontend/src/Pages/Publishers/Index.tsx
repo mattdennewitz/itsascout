@@ -2,7 +2,7 @@ import { DataTable } from '@/datatable/table'
 import { columns, type Publisher } from '@/datatable/columns'
 import AppLayout from '@/Layouts/AppLayout'
 import { Link, router, usePage, Deferred } from '@inertiajs/react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 
 interface Props {
@@ -24,7 +24,13 @@ function Index({ publishers }: Props) {
         return params.get('search') || ''
     })
 
+    const isInitialMount = useRef(true)
+
     useEffect(() => {
+        if (isInitialMount.current) {
+            isInitialMount.current = false
+            return
+        }
         const timeout = setTimeout(() => {
             router.get('/',
                 { search: search || undefined },
@@ -42,7 +48,7 @@ function Index({ publishers }: Props) {
     return (
         <div className="container mx-auto py-10">
             <div className="flex justify-between items-center mb-6">
-                <h1 className="text-2xl font-bold">Publishers</h1>
+                <h1 className="text-2xl">Publishers</h1>
                 <div className="flex gap-2">
                     <Link
                         href="/publishers/create"

@@ -30,7 +30,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     }, [flash])
 
     return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen">
             <nav className="bg-white shadow-sm border-b">
                 <div className="container mx-auto px-4 py-3 flex items-center justify-between">
                     <Link href="/" className="text-lg font-bold text-gray-900 hover:text-gray-700">

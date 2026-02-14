@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-13)
 
 **Core value:** Paste a URL, get a comprehensive scraping report card with real-time progress as each check completes.
-**Current focus:** Phase 7 -- Fetch Strategy
+**Current focus:** Phase 8 complete, ready for Phase 9
 
 ## Current Position
 
-Phase: 7 of 11 (Fetch Strategy)
-Plan: 1 of 1 in current phase
-Status: Phase 7 complete
-Last activity: 2026-02-14 -- Phase 7 plan 1 complete (fetch strategy manager with TDD)
+Phase: 8 of 11 (Core Pipeline & SSE)
+Plan: 3 of 3 in current phase
+Status: Phase 8 complete (verified)
+Last activity: 2026-02-14 -- Phase 8 complete. All 3 plans executed, verified 6/6 must-haves.
 
-Progress: [███░░░░░░░] 27%
+Progress: [██████░░░░] 55%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3 (v2.0)
-- Average duration: 3.3min
-- Total execution time: 0.17 hours
+- Total plans completed: 6 (v2.0)
+- Average duration: 3min
+- Total execution time: 0.30 hours
 
 **By Phase:**
 
@@ -29,10 +29,11 @@ Progress: [███░░░░░░░] 27%
 |-------|-------|-------|----------|
 | 06-infrastructure-models | 2 | 7min | 3.5min |
 | 07-fetch-strategy | 1 | 3min | 3min |
+| 08-core-pipeline-sse | 3 | 7min | 2.3min |
 
 **Recent Trend:**
-- Last 5 plans: 06-01 (3min), 06-02 (4min), 07-01 (3min)
-- Trend: stable
+- Last 5 plans: 06-02 (4min), 07-01 (3min), 08-01 (3min), 08-02 (2min), 08-03 (2min)
+- Trend: stable/improving
 
 *Updated after each plan completion*
 
@@ -57,10 +58,25 @@ Recent decisions affecting current work:
 - [07-01]: WAF detection via 6 content signatures + 403 status -- no body-length heuristic
 - [07-01]: Publisher.fetch_strategy saved only on change to avoid unnecessary DB writes
 - [07-01]: ZyteFetcher reads ZYTE_API_KEY at call time (not init) for per-request validation
+- [08-01]: Pipeline steps call existing ingestion agents directly rather than rewriting
+- [08-01]: Each step saves result to ResolutionJob before publishing Redis event (data persists if subscriber misses)
+- [08-01]: Supervisor merges ToS evaluation data into existing tos_result dict (one JSON field)
+- [08-01]: Publisher flat fields updated in supervisor for quick reads without joining to ResolutionJob
+- [08-02]: Daphne as first INSTALLED_APPS entry to hook into runserver for async SSE
+- [08-02]: Completed/failed jobs return single terminal SSE event (no Redis subscription needed)
+- [08-02]: Publisher get_or_create on domain for submit_url (matches factory pattern from 06-02)
+- [08-03]: Standard HTML form POST to /submit (not Inertia useForm) so redirect is handled as SPA transition
+- [08-03]: CSRF token read from document.cookie (csrftoken) matching Django's default cookie name
+- [08-03]: Completed jobs build stepStatuses from props (waf_result, tos_result) without SSE
+- [08-03]: EventSource closes on 'done' event, then reloads via router.reload() for final server props
 
 ### Pending Todos
 
 None yet.
+
+### Roadmap Evolution
+
+- Phase 12 added: Django Built-in Authentication
 
 ### Blockers/Concerns
 
@@ -69,5 +85,5 @@ None currently.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 07-01-PLAN.md. Phase 7 complete (1/1 plans). Ready for Phase 8 planning.
+Stopped at: Phase 8 complete and verified. Ready for Phase 9 planning.
 Resume file: None

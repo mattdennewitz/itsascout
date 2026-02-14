@@ -26,5 +26,8 @@ urlpatterns = [
     path("publishers/create", publishers.views.create, name="publisher-create"),
     path("publishers/<int:publisher_id>/edit", publishers.views.update, name="publisher-update"),
     path("publishers/bulk-upload", publishers.views.bulk_upload, name="publisher-bulk-upload"),
+    path("submit", publishers.views.submit_url, name="submit-url"),
+    path("jobs/<uuid:job_id>", publishers.views.job_show, name="job-show"),
+    path("api/jobs/<uuid:job_id>/stream", publishers.views.job_stream, name="job-stream"),
     path("", publishers.views.table, name="table"),
 ]

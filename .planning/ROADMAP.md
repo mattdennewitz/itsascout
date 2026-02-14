@@ -24,7 +24,7 @@
 
 - [x] **Phase 6: Infrastructure & Models** -- Redis, RQ, data models, pytest setup, URL sanitization -- completed 2026-02-14
 - [x] **Phase 7: Fetch Strategy** -- curl-cffi with browser TLS fingerprinting and Zyte fallback -- completed 2026-02-14
-- [ ] **Phase 8: Core Pipeline & SSE** -- End-to-end URL entry through streaming results with publisher resolution, WAF, and ToS
+- [x] **Phase 8: Core Pipeline & SSE** -- End-to-end URL entry through streaming results with publisher resolution, WAF, and ToS -- completed 2026-02-14
 - [ ] **Phase 9: Publisher Discovery** -- robots.txt, sitemap, RSS, and RSL pipeline steps
 - [ ] **Phase 10: Article Metadata** -- Structured data extraction, paywall detection, and LLM metadata profiling
 - [ ] **Phase 11: Report Card UI** -- Publisher and article report cards with full end-to-end integration test
@@ -70,12 +70,12 @@ Plans:
   3. Submitting a duplicate URL redirects to the existing job results instead of re-running the pipeline
   4. Pipeline skips publisher-level steps when the publisher was analyzed within the configured freshness TTL
   5. Existing publisher table and admin actions continue working unchanged
-**Plans:** TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 08-01: URL entry, ResolutionJob creation, and SSE endpoint
-- [ ] 08-02: Pipeline supervisor job with publisher resolution, WAF, and ToS steps
-- [ ] 08-03: Streaming results page (Jobs/Show.tsx) with EventSource and progress UI
+- [x] 08-01-PLAN.md -- Pipeline supervisor with WAF and ToS steps (TDD)
+- [x] 08-02-PLAN.md -- Daphne ASGI, URL submission, SSE endpoint, and job views
+- [x] 08-03-PLAN.md -- Jobs/Show.tsx with EventSource and homepage URL input
 
 ### Phase 9: Publisher Discovery
 **Goal:** Pipeline discovers and caches publisher crawling policy signals -- robots.txt rules, sitemap locations, RSS feeds, and RSL licensing
@@ -134,12 +134,21 @@ Plans:
 | 5. Cleanup & Verification | v1.0 | 2/2 | Complete | 2026-02-13 |
 | 6. Infrastructure & Models | v2.0 | 2/2 | Complete | 2026-02-14 |
 | 7. Fetch Strategy | v2.0 | 1/1 | Complete | 2026-02-14 |
-| 8. Core Pipeline & SSE | v2.0 | 0/3 | Not started | - |
+| 8. Core Pipeline & SSE | v2.0 | 3/3 | Complete | 2026-02-14 |
 | 9. Publisher Discovery | v2.0 | 0/2 | Not started | - |
 | 10. Article Metadata | v2.0 | 0/1 | Not started | - |
 | 11. Report Card UI | v2.0 | 0/2 | Not started | - |
 
-**v2.0 Overall:** 9/34 requirements complete (26%)
+**v2.0 Overall:** 23/34 requirements complete (68%)
+
+### Phase 12: Django Built-in Authentication
+
+**Goal:** [To be planned]
+**Depends on:** Phase 11
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 12 to break down)
 
 ---
 

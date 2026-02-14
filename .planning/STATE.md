@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-13)
 ## Current Position
 
 Phase: 8 of 11 (Core Pipeline & SSE)
-Plan: 1 of 3 in current phase
-Status: Plan 08-01 complete
-Last activity: 2026-02-14 -- Phase 8 plan 1 complete (pipeline supervisor with WAF and ToS steps)
+Plan: 3 of 3 in current phase
+Status: Plan 08-03 complete
+Last activity: 2026-02-14 -- Phase 8 plan 3 complete (frontend pages with EventSource progress cards and URL submission form)
 
-Progress: [████░░░░░░] 36%
+Progress: [██████░░░░] 55%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4 (v2.0)
-- Average duration: 3.3min
-- Total execution time: 0.22 hours
+- Total plans completed: 6 (v2.0)
+- Average duration: 3min
+- Total execution time: 0.30 hours
 
 **By Phase:**
 
@@ -29,11 +29,11 @@ Progress: [████░░░░░░] 36%
 |-------|-------|-------|----------|
 | 06-infrastructure-models | 2 | 7min | 3.5min |
 | 07-fetch-strategy | 1 | 3min | 3min |
-| 08-core-pipeline-sse | 1 | 3min | 3min |
+| 08-core-pipeline-sse | 3 | 7min | 2.3min |
 
 **Recent Trend:**
-- Last 5 plans: 06-01 (3min), 06-02 (4min), 07-01 (3min), 08-01 (3min)
-- Trend: stable
+- Last 5 plans: 06-02 (4min), 07-01 (3min), 08-01 (3min), 08-02 (2min), 08-03 (2min)
+- Trend: stable/improving
 
 *Updated after each plan completion*
 
@@ -62,6 +62,10 @@ Recent decisions affecting current work:
 - [08-01]: Each step saves result to ResolutionJob before publishing Redis event (data persists if subscriber misses)
 - [08-01]: Supervisor merges ToS evaluation data into existing tos_result dict (one JSON field)
 - [08-01]: Publisher flat fields updated in supervisor for quick reads without joining to ResolutionJob
+- [08-03]: Standard HTML form POST to /submit (not Inertia useForm) so redirect is handled as SPA transition
+- [08-03]: CSRF token read from document.cookie (csrftoken) matching Django's default cookie name
+- [08-03]: Completed jobs build stepStatuses from props (waf_result, tos_result) without SSE
+- [08-03]: EventSource closes on 'done' event, then reloads via router.reload() for final server props
 
 ### Pending Todos
 
@@ -74,5 +78,5 @@ None currently.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 08-01-PLAN.md. Pipeline supervisor with WAF and ToS steps. Plans 08-02 (SSE endpoint) and 08-03 (frontend) remain.
+Stopped at: Completed 08-03-PLAN.md. Frontend pages with EventSource progress cards and URL submission form. Phase 8 complete (all 3 plans done).
 Resume file: None

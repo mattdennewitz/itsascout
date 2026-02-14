@@ -62,6 +62,9 @@ Recent decisions affecting current work:
 - [08-01]: Each step saves result to ResolutionJob before publishing Redis event (data persists if subscriber misses)
 - [08-01]: Supervisor merges ToS evaluation data into existing tos_result dict (one JSON field)
 - [08-01]: Publisher flat fields updated in supervisor for quick reads without joining to ResolutionJob
+- [08-02]: Daphne as first INSTALLED_APPS entry to hook into runserver for async SSE
+- [08-02]: Completed/failed jobs return single terminal SSE event (no Redis subscription needed)
+- [08-02]: Publisher get_or_create on domain for submit_url (matches factory pattern from 06-02)
 - [08-03]: Standard HTML form POST to /submit (not Inertia useForm) so redirect is handled as SPA transition
 - [08-03]: CSRF token read from document.cookie (csrftoken) matching Django's default cookie name
 - [08-03]: Completed jobs build stepStatuses from props (waf_result, tos_result) without SSE
@@ -78,5 +81,5 @@ None currently.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 08-03-PLAN.md. Frontend pages with EventSource progress cards and URL submission form. Phase 8 complete (all 3 plans done).
+Stopped at: Completed 08-02-PLAN.md (backfill). Added 11 view tests and SUMMARY. Phase 8 all 3 plans have SUMMARYs now.
 Resume file: None

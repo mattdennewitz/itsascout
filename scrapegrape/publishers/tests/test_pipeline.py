@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from django.utils import timezone
+from requests.exceptions import ConnectionError as RequestsConnectionError
 
 from publishers.factories import PublisherFactory, ResolutionJobFactory
 
@@ -377,3 +378,288 @@ class TestRunPipeline:
         assert job.waf_result["waf_type"] == "Cloudflare"
         assert job.tos_result["tos_url"] == "https://example.com/tos"
         assert "permissions" in job.tos_result
+
+
+# ---------------------------------------------------------------------------
+# TestExtractLicenseDirectives
+# ---------------------------------------------------------------------------
+
+
+class TestExtractLicenseDirectives:
+    def test_single_license(self):
+        """Single License directive is extracted."""
+        from publishers.pipeline.steps import _extract_license_directives
+
+        text = "User-agent: *\nAllow: /\nLicense: https://example.com/license.xml"
+        result = _extract_license_directives(text)
+        assert result == ["https://example.com/license.xml"]
+
+    def test_multiple_licenses(self):
+        """Multiple License directives are extracted."""
+        from publishers.pipeline.steps import _extract_license_directives
+
+        text = (
+            "License: https://example.com/license1.xml\n"
+            "License: https://example.com/license2.xml"
+        )
+        result = _extract_license_directives(text)
+        assert len(result) == 2
+        assert "https://example.com/license1.xml" in result
+        assert "https://example.com/license2.xml" in result
+
+    def test_no_license(self):
+        """No License directives returns empty list."""
+        from publishers.pipeline.steps import _extract_license_directives
+
+        text = "User-agent: *\nAllow: /"
+        result = _extract_license_directives(text)
+        assert result == []
+
+    def test_case_insensitive(self):
+        """Lowercase 'license:' is still extracted."""
+        from publishers.pipeline.steps import _extract_license_directives
+
+        text = "license: https://example.com/license.xml"
+        result = _extract_license_directives(text)
+        assert result == ["https://example.com/license.xml"]
+
+
+# ---------------------------------------------------------------------------
+# TestRunRobotsStep
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestRunRobotsStep:
+    def test_robots_found_url_allowed(self, monkeypatch):
+        """robots step parses robots.txt and reports url_allowed=True."""
+        from publishers.pipeline.steps import run_robots_step
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "text/plain"}
+        mock_response.text = (
+            "User-agent: *\nAllow: /\n"
+            "Sitemap: https://example.com/sitemap.xml"
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.steps.requests.get", lambda *a, **kw: mock_response
+        )
+
+        publisher = PublisherFactory(domain="example.com")
+        result = run_robots_step(publisher, "https://example.com/article")
+        assert result["robots_found"] is True
+        assert result["url_allowed"] is True
+        assert "https://example.com/sitemap.xml" in result["sitemaps_from_robots"]
+
+    def test_robots_found_url_disallowed(self, monkeypatch):
+        """robots step reports url_allowed=False for disallowed path."""
+        from publishers.pipeline.steps import run_robots_step
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "text/plain"}
+        mock_response.text = "User-agent: *\nDisallow: /private/"
+        monkeypatch.setattr(
+            "publishers.pipeline.steps.requests.get", lambda *a, **kw: mock_response
+        )
+
+        publisher = PublisherFactory(domain="example.com")
+        result = run_robots_step(publisher, "https://example.com/private/secret")
+        assert result["robots_found"] is True
+        assert result["url_allowed"] is False
+
+    def test_robots_not_found_404(self, monkeypatch):
+        """robots step returns robots_found=False on 404."""
+        from publishers.pipeline.steps import run_robots_step
+
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        monkeypatch.setattr(
+            "publishers.pipeline.steps.requests.get", lambda *a, **kw: mock_response
+        )
+
+        publisher = PublisherFactory(domain="example.com")
+        result = run_robots_step(publisher, "https://example.com/article")
+        assert result["robots_found"] is False
+        assert result["status_code"] == 404
+
+    def test_robots_html_challenge_page(self, monkeypatch):
+        """robots step treats 200 with text/html as WAF challenge (not found)."""
+        from publishers.pipeline.steps import run_robots_step
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "text/html; charset=utf-8"}
+        mock_response.text = "<html><body>Challenge</body></html>"
+        monkeypatch.setattr(
+            "publishers.pipeline.steps.requests.get", lambda *a, **kw: mock_response
+        )
+
+        publisher = PublisherFactory(domain="example.com")
+        result = run_robots_step(publisher, "https://example.com/article")
+        assert result["robots_found"] is False
+
+    def test_robots_network_error(self, monkeypatch):
+        """robots step returns robots_found=False with error on network failure."""
+        from publishers.pipeline.steps import run_robots_step
+
+        def raise_error(*a, **kw):
+            raise RequestsConnectionError("connection refused")
+
+        monkeypatch.setattr(
+            "publishers.pipeline.steps.requests.get", raise_error
+        )
+
+        publisher = PublisherFactory(domain="example.com")
+        result = run_robots_step(publisher, "https://example.com/article")
+        assert result["robots_found"] is False
+        assert "error" in result
+
+    def test_robots_malformed_content(self, monkeypatch):
+        """robots step returns robots_found=False on malformed/binary content."""
+        from publishers.pipeline.steps import run_robots_step
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "text/plain"}
+        mock_response.text = "\x00\x01\x02binary garbage"
+
+        # Make Protego.parse raise
+        monkeypatch.setattr(
+            "publishers.pipeline.steps.requests.get", lambda *a, **kw: mock_response
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.steps.Protego.parse",
+            lambda text: (_ for _ in ()).throw(Exception("parse error")),
+        )
+
+        publisher = PublisherFactory(domain="example.com")
+        result = run_robots_step(publisher, "https://example.com/article")
+        assert result["robots_found"] is False
+        assert result["error"] == "malformed robots.txt"
+
+    def test_robots_extracts_license_directives(self, monkeypatch):
+        """robots step extracts License: directives from robots.txt."""
+        from publishers.pipeline.steps import run_robots_step
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "text/plain"}
+        mock_response.text = (
+            "User-agent: *\nAllow: /\n"
+            "License: https://example.com/license.xml"
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.steps.requests.get", lambda *a, **kw: mock_response
+        )
+
+        publisher = PublisherFactory(domain="example.com")
+        result = run_robots_step(publisher, "https://example.com/article")
+        assert "https://example.com/license.xml" in result["license_directives"]
+
+    def test_robots_extracts_crawl_delay(self, monkeypatch):
+        """robots step extracts Crawl-delay value."""
+        from publishers.pipeline.steps import run_robots_step
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "text/plain"}
+        mock_response.text = "User-agent: itsascout\nCrawl-delay: 5\nAllow: /"
+        monkeypatch.setattr(
+            "publishers.pipeline.steps.requests.get", lambda *a, **kw: mock_response
+        )
+
+        publisher = PublisherFactory(domain="example.com")
+        result = run_robots_step(publisher, "https://example.com/article")
+        assert result["crawl_delay"] == 5.0
+
+
+# ---------------------------------------------------------------------------
+# TestRunSitemapStep
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestRunSitemapStep:
+    def test_sitemaps_from_robots(self):
+        """sitemap step returns sitemaps from robots_result, source='robots.txt'."""
+        from publishers.pipeline.steps import run_sitemap_step
+
+        publisher = PublisherFactory(domain="example.com")
+        robots_result = {
+            "sitemaps_from_robots": ["https://example.com/sitemap.xml"],
+        }
+        result = run_sitemap_step(publisher, robots_result)
+        assert "https://example.com/sitemap.xml" in result["sitemap_urls"]
+        assert result["source"] == "robots.txt"
+        assert result["count"] == 1
+
+    def test_sitemaps_from_probe(self, monkeypatch):
+        """sitemap step probes common paths when robots has no sitemaps."""
+        from publishers.pipeline.steps import run_sitemap_step
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/xml"}
+        monkeypatch.setattr(
+            "publishers.pipeline.steps.requests.head", lambda *a, **kw: mock_response
+        )
+
+        publisher = PublisherFactory(domain="example.com")
+        robots_result = {"sitemaps_from_robots": []}
+        result = run_sitemap_step(publisher, robots_result)
+        assert result["count"] >= 1
+        assert result["source"] == "probe"
+
+    def test_no_sitemaps_found(self, monkeypatch):
+        """sitemap step returns count=0, source='none' when nothing found."""
+        from publishers.pipeline.steps import run_sitemap_step
+
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        mock_response.headers = {"content-type": "text/html"}
+        monkeypatch.setattr(
+            "publishers.pipeline.steps.requests.head", lambda *a, **kw: mock_response
+        )
+
+        publisher = PublisherFactory(domain="example.com")
+        robots_result = {}
+        result = run_sitemap_step(publisher, robots_result)
+        assert result["count"] == 0
+        assert result["source"] == "none"
+
+    def test_probe_stops_at_first_success(self, monkeypatch):
+        """sitemap step stops probing after first successful response."""
+        from publishers.pipeline.steps import run_sitemap_step
+
+        call_count = []
+
+        def mock_head(*a, **kw):
+            call_count.append(1)
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.headers = {"content-type": "application/xml"}
+            return resp
+
+        monkeypatch.setattr(
+            "publishers.pipeline.steps.requests.head", mock_head
+        )
+
+        publisher = PublisherFactory(domain="example.com")
+        robots_result = {"sitemaps_from_robots": []}
+        result = run_sitemap_step(publisher, robots_result)
+        assert result["count"] == 1
+        assert len(call_count) == 1  # Only one probe was made
+
+    def test_relative_sitemap_urls_resolved(self):
+        """sitemap step resolves relative sitemap URLs from robots.txt."""
+        from publishers.pipeline.steps import run_sitemap_step
+
+        publisher = PublisherFactory(domain="example.com")
+        robots_result = {
+            "sitemaps_from_robots": ["/sitemap.xml"],
+        }
+        result = run_sitemap_step(publisher, robots_result)
+        assert "https://example.com/sitemap.xml" in result["sitemap_urls"]
+        assert result["source"] == "robots.txt"

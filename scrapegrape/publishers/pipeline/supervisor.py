@@ -8,12 +8,32 @@ from publishers.models import ResolutionJob
 from publishers.pipeline.events import publish_step_event
 from publishers.pipeline.steps import (
     run_robots_step,
+    run_rss_step,
+    run_rsl_step,
     run_sitemap_step,
     run_tos_discovery_step,
     run_tos_evaluation_step,
     run_waf_step,
     should_skip_publisher_steps,
 )
+
+
+def _fetch_homepage_html(publisher):
+    """Fetch publisher homepage HTML. Returns (html, headers) tuple."""
+    import requests as _requests
+
+    try:
+        resp = _requests.get(
+            f"https://{publisher.domain}/",
+            timeout=15,
+            headers={"User-Agent": "itsascout"},
+        )
+        if resp.status_code == 200:
+            return resp.text, dict(resp.headers)
+        return "", {}
+    except Exception as exc:
+        logger.warning(f"Could not fetch homepage for {publisher.domain}: {exc}")
+        return "", {}
 
 
 @job("default", timeout=600)
@@ -56,6 +76,8 @@ def run_pipeline(job_id: str):
             )
             publish_step_event(job_id, "robots", "skipped", {"reason": "fresh"})
             publish_step_event(job_id, "sitemap", "skipped", {"reason": "fresh"})
+            publish_step_event(job_id, "rss", "skipped", {"reason": "fresh"})
+            publish_step_event(job_id, "rsl", "skipped", {"reason": "fresh"})
         else:
             # Step 1: WAF check
             publish_step_event(job_id, "waf", "started")
@@ -127,6 +149,31 @@ def run_pipeline(job_id: str):
 
             publisher.sitemap_urls = sitemap_result.get("sitemap_urls", [])
             publisher.save(update_fields=["sitemap_urls"])
+
+            # Fetch homepage HTML once for RSS and RSL steps
+            homepage_html, homepage_headers = _fetch_homepage_html(publisher)
+
+            # Step 6: RSS feed discovery
+            publish_step_event(job_id, "rss", "started")
+            rss_result = run_rss_step(publisher, homepage_html)
+            resolution_job.rss_result = rss_result
+            resolution_job.save(update_fields=["rss_result"])
+            publish_step_event(job_id, "rss", "completed", rss_result)
+
+            publisher.rss_urls = [f["url"] for f in rss_result.get("feeds", [])]
+            publisher.save(update_fields=["rss_urls"])
+
+            # Step 7: RSL detection
+            publish_step_event(job_id, "rsl", "started")
+            rsl_result = run_rsl_step(
+                publisher, robots_result, homepage_html, homepage_headers
+            )
+            resolution_job.rsl_result = rsl_result
+            resolution_job.save(update_fields=["rsl_result"])
+            publish_step_event(job_id, "rsl", "completed", rsl_result)
+
+            publisher.rsl_detected = rsl_result.get("rsl_detected", False)
+            publisher.save(update_fields=["rsl_detected"])
 
             # Update freshness timestamp
             publisher.last_checked_at = timezone.now()

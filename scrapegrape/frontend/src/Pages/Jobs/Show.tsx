@@ -19,6 +19,10 @@ interface JobProps {
         publisher_domain: string
         waf_result: Record<string, unknown> | null
         tos_result: Record<string, unknown> | null
+        robots_result: Record<string, unknown> | null
+        sitemap_result: Record<string, unknown> | null
+        rss_result: Record<string, unknown> | null
+        rsl_result: Record<string, unknown> | null
         created_at: string
     }
 }
@@ -28,6 +32,10 @@ const PIPELINE_STEPS = [
     { key: 'waf', label: 'WAF Detection', icon: '2' },
     { key: 'tos_discovery', label: 'ToS Discovery', icon: '3' },
     { key: 'tos_evaluation', label: 'ToS Evaluation', icon: '4' },
+    { key: 'robots', label: 'robots.txt Analysis', icon: '5' },
+    { key: 'sitemap', label: 'Sitemap Discovery', icon: '6' },
+    { key: 'rss', label: 'RSS Feed Discovery', icon: '7' },
+    { key: 'rsl', label: 'RSL Detection', icon: '8' },
 ] as const
 
 function statusBadge(status: string) {
@@ -72,6 +80,26 @@ function stepDataSummary(step: string, data: Record<string, unknown>): string | 
         }
         if (data.permissions) return `Permissions: ${JSON.stringify(data.permissions)}`
         return null
+    }
+    if (step === 'robots') {
+        if (data.robots_found === false) return 'No robots.txt found'
+        if (data.url_allowed === true) return 'URL allowed by robots.txt'
+        if (data.url_allowed === false) return 'URL disallowed by robots.txt'
+        return null
+    }
+    if (step === 'sitemap') {
+        const count = data.count as number
+        if (count > 0) return `Found ${count} sitemap(s)`
+        return 'No sitemaps found'
+    }
+    if (step === 'rss') {
+        const count = data.count as number
+        if (count > 0) return `Found ${count} feed(s)`
+        return 'No RSS/Atom feeds found'
+    }
+    if (step === 'rsl') {
+        if (data.rsl_detected) return `RSL detected (${data.count} indicator(s))`
+        return 'No RSL licensing detected'
     }
     if (data.reason) return String(data.reason)
     if (data.error) return `Error: ${String(data.error)}`
@@ -185,6 +213,19 @@ function Show({ job }: JobProps) {
                     data: job.tos_result,
                 }
             }
+        }
+
+        if (job.robots_result) {
+            statuses['robots'] = { step: 'robots', status: 'completed', data: job.robots_result }
+        }
+        if (job.sitemap_result) {
+            statuses['sitemap'] = { step: 'sitemap', status: 'completed', data: job.sitemap_result }
+        }
+        if (job.rss_result) {
+            statuses['rss'] = { step: 'rss', status: 'completed', data: job.rss_result }
+        }
+        if (job.rsl_result) {
+            statuses['rsl'] = { step: 'rsl', status: 'completed', data: job.rsl_result }
         }
 
         return statuses

@@ -276,6 +276,22 @@ class TestRunPipeline:
                 "count": 0,
             },
         )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor._fetch_homepage_html",
+            lambda pub: ("<html></html>", {}),
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rss_step",
+            lambda pub, html: {"feeds": [], "count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rsl_step",
+            lambda pub, robots, html, headers=None: {
+                "rsl_detected": False,
+                "indicators": [],
+                "count": 0,
+            },
+        )
 
         run_pipeline(str(job.id))
 
@@ -289,6 +305,8 @@ class TestRunPipeline:
         assert "tos_evaluation" in step_names
         assert "robots" in step_names
         assert "sitemap" in step_names
+        assert "rss" in step_names
+        assert "rsl" in step_names
         assert "pipeline" in step_names
         assert ("pipeline", "completed") in events_published
 
@@ -336,6 +354,22 @@ class TestRunPipeline:
                 "count": 0,
             },
         )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor._fetch_homepage_html",
+            lambda pub: ("", {}),
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rss_step",
+            lambda pub, html: {"feeds": [], "count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rsl_step",
+            lambda pub, robots, html, headers=None: {
+                "rsl_detected": False,
+                "indicators": [],
+                "count": 0,
+            },
+        )
 
         run_pipeline(str(job.id))
 
@@ -349,6 +383,8 @@ class TestRunPipeline:
         assert ("tos_evaluation", "skipped") in events_published
         assert ("robots", "skipped") in events_published
         assert ("sitemap", "skipped") in events_published
+        assert ("rss", "skipped") in events_published
+        assert ("rsl", "skipped") in events_published
 
     def test_pipeline_sets_failed_on_exception(self, monkeypatch):
         """Pipeline sets job status to failed on unhandled exception."""
@@ -417,6 +453,25 @@ class TestRunPipeline:
                 "count": 1,
             },
         )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor._fetch_homepage_html",
+            lambda pub: ("<html></html>", {}),
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rss_step",
+            lambda pub, html: {
+                "feeds": [{"url": "https://example.com/feed", "type": "application/rss+xml", "title": ""}],
+                "count": 1,
+            },
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rsl_step",
+            lambda pub, robots, html, headers=None: {
+                "rsl_detected": True,
+                "indicators": [{"source": "robots.txt", "url": "https://example.com/license.xml"}],
+                "count": 1,
+            },
+        )
 
         run_pipeline(str(job.id))
 
@@ -429,6 +484,8 @@ class TestRunPipeline:
         assert job.sitemap_result["sitemap_urls"] == [
             "https://example.com/sitemap.xml"
         ]
+        assert job.rss_result["count"] == 1
+        assert job.rsl_result["rsl_detected"] is True
 
     def test_pipeline_updates_publisher_robots_and_sitemap_fields(self, monkeypatch):
         """Pipeline updates publisher flat fields for robots and sitemap."""
@@ -467,6 +524,22 @@ class TestRunPipeline:
                 "count": 1,
             },
         )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor._fetch_homepage_html",
+            lambda pub: ("<html></html>", {}),
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rss_step",
+            lambda pub, html: {"feeds": [], "count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rsl_step",
+            lambda pub, robots, html, headers=None: {
+                "rsl_detected": False,
+                "indicators": [],
+                "count": 0,
+            },
+        )
 
         run_pipeline(str(job.id))
 
@@ -475,6 +548,69 @@ class TestRunPipeline:
         assert publisher.robots_txt_found is True
         assert publisher.robots_txt_url_allowed is True
         assert publisher.sitemap_urls == ["https://example.com/sitemap.xml"]
+
+    def test_pipeline_updates_publisher_rss_and_rsl_fields(self, monkeypatch):
+        """Pipeline updates publisher flat fields for rss_urls and rsl_detected."""
+        from publishers.pipeline.supervisor import run_pipeline
+
+        job = ResolutionJobFactory(status="pending")
+
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.publish_step_event",
+            lambda job_id, step, status, data=None: None,
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_waf_step",
+            lambda pub: {"waf_detected": False, "waf_type": ""},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_tos_discovery_step",
+            lambda pub: {"tos_url": None},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_tos_evaluation_step",
+            lambda pub, tos_url: {"skipped": True},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_robots_step",
+            lambda pub, url: {"robots_found": True, "url_allowed": True},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_sitemap_step",
+            lambda pub, robots_result: {
+                "sitemap_urls": [],
+                "source": "none",
+                "count": 0,
+            },
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor._fetch_homepage_html",
+            lambda pub: ("<html></html>", {}),
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rss_step",
+            lambda pub, html: {
+                "feeds": [
+                    {"url": "https://example.com/feed", "type": "application/rss+xml", "title": ""},
+                ],
+                "count": 1,
+            },
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rsl_step",
+            lambda pub, robots, html, headers=None: {
+                "rsl_detected": True,
+                "indicators": [{"source": "robots.txt", "url": "https://example.com/license.xml"}],
+                "count": 1,
+            },
+        )
+
+        run_pipeline(str(job.id))
+
+        publisher = job.publisher
+        publisher.refresh_from_db()
+        assert publisher.rss_urls == ["https://example.com/feed"]
+        assert publisher.rsl_detected is True
 
 
 # ---------------------------------------------------------------------------

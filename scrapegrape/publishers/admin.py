@@ -6,7 +6,7 @@ from django.urls import reverse, path
 from django_object_actions import DjangoObjectActions, action
 from django import forms
 import json
-from .models import Publisher, WAFReport
+from .models import Publisher, ResolutionJob, WAFReport
 from .tasks import analyze_url
 from ingestion.services import (
     create_terms_discovery_from_url,
@@ -248,9 +248,9 @@ class WAFReportInline(admin.TabularInline):
 
 @admin.register(Publisher)
 class PublisherAdmin(DjangoObjectActions, admin.ModelAdmin):
-    list_display = ["name", "url", "detected_waf", "waf_reports_count"]
+    list_display = ["name", "domain", "url", "detected_waf", "waf_reports_count"]
     list_filter = ["detected_waf"]
-    search_fields = ["name", "url"]
+    search_fields = ["name", "domain", "url"]
     actions = [
         perform_waf_scan,
         discover_terms,
@@ -451,6 +451,18 @@ class WAFReportAdmin(admin.ModelAdmin):
     list_filter = ["detected", "firewall", "manufacturer", "created_at"]
     search_fields = ["publisher__name", "firewall", "manufacturer"]
     readonly_fields = ["created_at"]
+    date_hierarchy = "created_at"
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("publisher")
+
+
+@admin.register(ResolutionJob)
+class ResolutionJobAdmin(admin.ModelAdmin):
+    list_display = ["id", "canonical_url", "publisher", "status", "created_at"]
+    list_filter = ["status", "created_at"]
+    search_fields = ["canonical_url", "submitted_url", "publisher__name"]
+    readonly_fields = ["id", "created_at", "updated_at"]
     date_hierarchy = "created_at"
 
     def get_queryset(self, request):

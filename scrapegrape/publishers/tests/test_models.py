@@ -4,6 +4,7 @@ import pytest
 from django.db import IntegrityError
 
 from publishers.factories import PublisherFactory, ResolutionJobFactory
+from publishers.models import Publisher
 
 
 @pytest.mark.django_db
@@ -16,7 +17,10 @@ class TestPublisherModel:
     def test_publisher_domain_unique(self, db):
         PublisherFactory(domain="example.com")
         with pytest.raises(IntegrityError):
-            PublisherFactory(domain="example.com")
+            # Use model directly to bypass factory's get_or_create
+            Publisher.objects.create(
+                name="duplicate", url="https://example.com", domain="example.com"
+            )
 
     def test_publisher_str(self, publisher):
         assert str(publisher) == publisher.name

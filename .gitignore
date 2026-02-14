@@ -1,0 +1,35 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Environment files
+.env
+.env~
+
+# OS files
+.DS_Store
+
+# IDE files
+.idea/
+
+# Backup files
+*~
+
+# Local tool config
+.mcp.json
+.chunkhound.json
+.chunkhound/
+
+# GSD local config
+.planning/codebase/
+.planning/config.json
+
+# Generated output
+reports.json

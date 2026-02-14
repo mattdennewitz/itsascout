@@ -10,6 +10,8 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
+from datetime import timedelta
 from pathlib import Path
 from dotenv import load_dotenv
 import dj_database_url
@@ -44,8 +46,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "django_vite",
     "django_object_actions",
-    "django_tasks",
-    "django_tasks.backends.database",
+    "django_rq",
     "rest_framework",
     "inertia",
     "ingestion",
@@ -135,7 +136,16 @@ STATICFILES_DIRS = [
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-TASKS = {"default": {"BACKEND": "django_tasks.backends.database.DatabaseBackend"}}
+RQ_QUEUES = {
+    "default": {
+        "HOST": os.environ.get("REDIS_HOST", "localhost"),
+        "PORT": int(os.environ.get("REDIS_PORT", 6379)),
+        "DB": 0,
+        "DEFAULT_TIMEOUT": 600,
+    },
+}
+
+PUBLISHER_FRESHNESS_TTL = timedelta(hours=24)
 
 # Django Vite configuration
 DJANGO_VITE = {

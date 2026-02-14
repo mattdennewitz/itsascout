@@ -16,12 +16,13 @@ Including another URLconf
 """
 
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
 
 import publishers.views
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("django-rq/", include("django_rq.urls")),
     path("publishers/create", publishers.views.create, name="publisher-create"),
     path("publishers/<int:publisher_id>/edit", publishers.views.update, name="publisher-update"),
     path("publishers/bulk-upload", publishers.views.bulk_upload, name="publisher-bulk-upload"),

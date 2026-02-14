@@ -25,6 +25,19 @@ class Publisher(models.Model):
     rss_urls = models.JSONField(default=list, blank=True)
     rsl_detected = models.BooleanField(null=True)
 
+    # NEW: Remembered fetch strategy (populated by FetchStrategyManager)
+    FETCH_STRATEGY_CHOICES = [
+        ("", "Auto (no preference)"),
+        ("curl_cffi", "curl-cffi"),
+        ("zyte", "Zyte API"),
+    ]
+    fetch_strategy = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        choices=FETCH_STRATEGY_CHOICES,
+    )
+
     # NEW: Freshness tracking
     last_checked_at = models.DateTimeField(null=True, blank=True)
 

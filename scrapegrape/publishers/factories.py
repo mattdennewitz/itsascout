@@ -13,6 +13,7 @@ class PublisherFactory(factory.django.DjangoModelFactory):
     name = factory.Sequence(lambda n: f"publisher-{n}.com")
     url = factory.LazyAttribute(lambda o: f"https://{o.name}")
     domain = factory.LazyAttribute(lambda o: o.name)
+    fetch_strategy = ""
 
 
 class ResolutionJobFactory(factory.django.DjangoModelFactory):

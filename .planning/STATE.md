@@ -9,28 +9,28 @@ See: .planning/PROJECT.md (updated 2026-02-13)
 
 ## Current Position
 
-Phase: 6 of 11 (Infrastructure & Models)
-Plan: 1 of 2 in current phase
-Status: Executing
-Last activity: 2026-02-14 -- Completed 06-01 (Redis + RQ infrastructure)
+Phase: 6 of 11 (Infrastructure & Models) -- COMPLETE
+Plan: 2 of 2 in current phase
+Status: Phase Complete
+Last activity: 2026-02-14 -- Completed 06-02 (Data models & URL sanitizer)
 
-Progress: [█░░░░░░░░░] 8%
+Progress: [██░░░░░░░░] 15%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1 (v2.0)
-- Average duration: 3min
-- Total execution time: 0.05 hours
+- Total plans completed: 2 (v2.0)
+- Average duration: 3.5min
+- Total execution time: 0.12 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 06-infrastructure-models | 1 | 3min | 3min |
+| 06-infrastructure-models | 2 | 7min | 3.5min |
 
 **Recent Trend:**
-- Last 5 plans: 06-01 (3min)
+- Last 5 plans: 06-01 (3min), 06-02 (4min)
 - Trend: --
 
 *Updated after each plan completion*
@@ -49,6 +49,9 @@ Recent decisions affecting current work:
 - [06-01]: Replaced django_tasks with django-rq backed by Redis for production-grade task queue
 - [06-01]: REDIS_HOST defaults to localhost for local dev/pytest, overridden to redis in Docker
 - [06-01]: Installed w3lib, pytest, pytest-django, factory-boy, pytest-cov ahead of Plan 02
+- [06-02]: 3-step migration pattern (add, populate, add unique) for domain field on existing data
+- [06-02]: Factory get_or_create on domain to prevent duplicate publishers in tests
+- [06-02]: 28 tracking params in URL sanitizer denylist covering all major ad/analytics platforms
 
 ### Pending Todos
 
@@ -61,5 +64,5 @@ None currently.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 06-01-PLAN.md (Redis + RQ infrastructure)
+Stopped at: Completed 06-02-PLAN.md (Data models & URL sanitizer) -- Phase 06 complete
 Resume file: None

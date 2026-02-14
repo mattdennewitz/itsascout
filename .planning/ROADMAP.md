@@ -86,11 +86,11 @@ Plans:
   2. Pipeline discovers sitemap URLs from robots.txt directives and common paths, storing found URLs on the publisher
   3. Pipeline discovers RSS/Atom feed URLs from HTML link tags, storing found URLs on the publisher
   4. Pipeline detects RSL licensing indicators via HTML tags, HTTP headers, and robots.txt directives
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 09-01: robots.txt and sitemap discovery pipeline steps
-- [ ] 09-02: RSS feed discovery and RSL detection pipeline steps
+- [ ] 09-01-PLAN.md -- robots.txt and sitemap discovery pipeline steps (TDD)
+- [ ] 09-02-PLAN.md -- RSS feed discovery, RSL detection, and frontend update (TDD)
 
 ### Phase 10: Article Metadata
 **Goal:** Pipeline extracts structured data from the submitted article URL -- what metadata is available, whether it is paywalled, and an LLM-generated human-readable profile

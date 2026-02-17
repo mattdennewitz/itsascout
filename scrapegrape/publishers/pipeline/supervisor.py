@@ -6,10 +6,13 @@ from loguru import logger
 
 from publishers.fetchers.exceptions import AllStrategiesExhausted
 from publishers.fetchers.manager import FetchStrategyManager
-from publishers.models import ResolutionJob
+from publishers.models import ArticleMetadata, ResolutionJob
 from publishers.pipeline.events import publish_step_event
 from publishers.pipeline.steps import (
     run_ai_bot_blocking_step,
+    run_article_extraction_step,
+    run_metadata_profile_step,
+    run_paywall_detection_step,
     run_publisher_details_step,
     run_robots_step,
     run_rss_step,
@@ -37,6 +40,17 @@ def _fetch_homepage_html(publisher):
         return "", {}
 
 
+def _should_skip_article_steps(article_url: str) -> bool:
+    """Return True if this article URL was analyzed within ARTICLE_FRESHNESS_TTL."""
+    from django.conf import settings
+
+    recent = ArticleMetadata.objects.filter(
+        article_url=article_url,
+        created_at__gte=timezone.now() - settings.ARTICLE_FRESHNESS_TTL,
+    ).first()
+    return recent is not None
+
+
 @job("default", timeout=600)
 def run_pipeline(job_id: str):
     """Pipeline supervisor: runs all steps sequentially for a ResolutionJob.
@@ -55,6 +69,10 @@ def run_pipeline(job_id: str):
     publisher = resolution_job.publisher
 
     try:
+        # homepage_html is set by publisher steps; initialise for the
+        # article-steps branch that may run even when publisher steps are skipped.
+        homepage_html = ""
+
         # Step 0: Publisher details starts (resolution data available immediately)
         publish_step_event(
             job_id,
@@ -81,6 +99,9 @@ def run_pipeline(job_id: str):
             publish_step_event(job_id, "rss", "skipped", {"reason": "fresh"})
             publish_step_event(job_id, "rsl", "skipped", {"reason": "fresh"})
             publish_step_event(job_id, "publisher_details", "skipped", {"reason": "fresh"})
+            publish_step_event(job_id, "article_extraction", "skipped", {"reason": "fresh"})
+            publish_step_event(job_id, "paywall_detection", "skipped", {"reason": "fresh"})
+            publish_step_event(job_id, "metadata_profile", "skipped", {"reason": "fresh"})
         else:
             # Step 1: WAF check
             publish_step_event(job_id, "waf", "started")
@@ -205,6 +226,84 @@ def run_pipeline(job_id: str):
             # Update freshness timestamp
             publisher.last_checked_at = timezone.now()
             publisher.save(update_fields=["last_checked_at"])
+
+        # --- Article-level steps ---
+        article_url = resolution_job.canonical_url
+
+        if _should_skip_article_steps(article_url):
+            publish_step_event(job_id, "article_extraction", "skipped", {"reason": "fresh"})
+            publish_step_event(job_id, "paywall_detection", "skipped", {"reason": "fresh"})
+            publish_step_event(job_id, "metadata_profile", "skipped", {"reason": "fresh"})
+        else:
+            # Fetch article HTML (reuse homepage_html if article URL matches homepage)
+            homepage_url = publisher.url or f"https://{publisher.domain}/"
+            if article_url.rstrip("/") == homepage_url.rstrip("/"):
+                article_html = homepage_html  # Already fetched above
+            else:
+                try:
+                    fetch_result = _fetch_manager.fetch(article_url, publisher=publisher)
+                    article_html = fetch_result.html
+                except AllStrategiesExhausted as exc:
+                    logger.warning(f"Could not fetch article {article_url}: {exc}")
+                    article_html = ""
+
+            # Step 10: Article extraction
+            publish_step_event(job_id, "article_extraction", "started")
+            extraction_result = run_article_extraction_step(article_html, article_url)
+
+            # Step 11: Paywall detection
+            publish_step_event(job_id, "paywall_detection", "started")
+            paywall_result = run_paywall_detection_step(article_html, extraction_result)
+
+            # Step 12: Metadata profile
+            publish_step_event(job_id, "metadata_profile", "started")
+            profile_result = run_metadata_profile_step(extraction_result, article_url)
+
+            # Combine into article_result
+            article_result = {
+                **extraction_result,
+                "paywall": paywall_result,
+                "profile": profile_result,
+            }
+            resolution_job.article_result = article_result
+            resolution_job.save(update_fields=["article_result"])
+
+            # Create ArticleMetadata record
+            ArticleMetadata.objects.create(
+                resolution_job=resolution_job,
+                publisher=publisher,
+                article_url=article_url,
+                jsonld_fields=extraction_result.get("jsonld_fields"),
+                opengraph_fields=extraction_result.get("opengraph_fields"),
+                microdata_fields=extraction_result.get("microdata_fields"),
+                twitter_cards=extraction_result.get("twitter_cards"),
+                has_jsonld=bool(extraction_result.get("jsonld_fields")),
+                has_opengraph=bool(extraction_result.get("opengraph_fields")),
+                has_microdata=bool(extraction_result.get("microdata_fields")),
+                has_twitter_cards=bool(extraction_result.get("twitter_cards")),
+                paywall_status=paywall_result.get("paywall_status", "unknown"),
+                paywall_signals=paywall_result.get("signals", []),
+                metadata_profile=profile_result.get("summary", ""),
+            )
+
+            # Update publisher-level paywall signal (latest article's status)
+            publisher.has_paywall = paywall_result.get("paywall_status") in ("paywalled", "metered")
+            publisher.save(update_fields=["has_paywall"])
+
+            # Publish completion events with summaries
+            fields_found = extraction_result.get("formats_found", [])
+            extraction_summary = f"{len(fields_found)} format(s): {', '.join(fields_found)}" if fields_found else "No structured data found"
+            publish_step_event(job_id, "article_extraction", "completed", {**extraction_result, "summary": extraction_summary})
+
+            paywall_summary = f"Status: {paywall_result.get('paywall_status', 'unknown')}"
+            if paywall_result.get("schema_accessible") is not None:
+                paywall_summary += f" (isAccessibleForFree: {paywall_result['schema_accessible']})"
+            publish_step_event(job_id, "paywall_detection", "completed", {**paywall_result, "summary": paywall_summary})
+
+            profile_summary_text = profile_result.get("summary", "")[:50]
+            if len(profile_result.get("summary", "")) > 50:
+                profile_summary_text += "..."
+            publish_step_event(job_id, "metadata_profile", "completed", {**profile_result, "summary": profile_summary_text})
 
         # Mark job complete
         resolution_job.status = "completed"

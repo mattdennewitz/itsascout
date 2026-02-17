@@ -10,6 +10,7 @@ from django.utils import timezone
 from publishers.factories import PublisherFactory, ResolutionJobFactory
 from publishers.fetchers.base import FetchResult
 from publishers.fetchers.exceptions import AllStrategiesExhausted
+from publishers.models import ArticleMetadata
 
 
 # ---------------------------------------------------------------------------
@@ -393,6 +394,28 @@ class TestRunPipeline:
                 "candidate_count": 0,
             },
         )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_article_extraction_step",
+            lambda html, url: {
+                "jsonld_fields": None,
+                "opengraph_fields": None,
+                "microdata_fields": None,
+                "twitter_cards": None,
+                "formats_found": [],
+            },
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_paywall_detection_step",
+            lambda html, extraction: {
+                "paywall_status": "free",
+                "signals": [],
+                "schema_accessible": None,
+            },
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_metadata_profile_step",
+            lambda extraction, url: {"summary": "Test summary", "quality_score": 0.5},
+        )
 
         run_pipeline(str(job.id))
 
@@ -410,6 +433,9 @@ class TestRunPipeline:
         assert "rss" in step_names
         assert "rsl" in step_names
         assert "publisher_details" in step_names
+        assert "article_extraction" in step_names
+        assert "paywall_detection" in step_names
+        assert "metadata_profile" in step_names
         assert "pipeline" in step_names
         assert ("pipeline", "completed") in events_published
 
@@ -490,6 +516,9 @@ class TestRunPipeline:
         assert ("rss", "skipped") in events_published
         assert ("rsl", "skipped") in events_published
         assert ("publisher_details", "skipped") in events_published
+        assert ("article_extraction", "skipped") in events_published
+        assert ("paywall_detection", "skipped") in events_published
+        assert ("metadata_profile", "skipped") in events_published
 
     def test_pipeline_sets_failed_on_exception(self, monkeypatch):
         """Pipeline sets job status to failed on unhandled exception."""
@@ -596,6 +625,28 @@ class TestRunPipeline:
                 "candidate_count": 1,
             },
         )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_article_extraction_step",
+            lambda html, url: {
+                "jsonld_fields": {"headline": "Test"},
+                "opengraph_fields": None,
+                "microdata_fields": None,
+                "twitter_cards": None,
+                "formats_found": ["json-ld"],
+            },
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_paywall_detection_step",
+            lambda html, extraction: {
+                "paywall_status": "free",
+                "signals": [],
+                "schema_accessible": None,
+            },
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_metadata_profile_step",
+            lambda extraction, url: {"summary": "Test", "quality_score": 0.5},
+        )
 
         run_pipeline(str(job.id))
 
@@ -687,6 +738,18 @@ class TestRunPipeline:
                 "candidate_count": 0,
             },
         )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_article_extraction_step",
+            lambda html, url: {"jsonld_fields": None, "opengraph_fields": None, "microdata_fields": None, "twitter_cards": None, "formats_found": []},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_paywall_detection_step",
+            lambda html, extraction: {"paywall_status": "free", "signals": [], "schema_accessible": None},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_metadata_profile_step",
+            lambda extraction, url: {"summary": "", "quality_score": 0.0},
+        )
 
         run_pipeline(str(job.id))
 
@@ -769,6 +832,18 @@ class TestRunPipeline:
                 "candidate_count": 0,
             },
         )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_article_extraction_step",
+            lambda html, url: {"jsonld_fields": None, "opengraph_fields": None, "microdata_fields": None, "twitter_cards": None, "formats_found": []},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_paywall_detection_step",
+            lambda html, extraction: {"paywall_status": "free", "signals": [], "schema_accessible": None},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_metadata_profile_step",
+            lambda extraction, url: {"summary": "", "quality_score": 0.0},
+        )
 
         run_pipeline(str(job.id))
 
@@ -849,6 +924,18 @@ class TestRunPipeline:
                 "candidate_count": 1,
             },
         )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_article_extraction_step",
+            lambda html, url: {"jsonld_fields": None, "opengraph_fields": None, "microdata_fields": None, "twitter_cards": None, "formats_found": []},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_paywall_detection_step",
+            lambda html, extraction: {"paywall_status": "free", "signals": [], "schema_accessible": None},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_metadata_profile_step",
+            lambda extraction, url: {"summary": "", "quality_score": 0.0},
+        )
 
         run_pipeline(str(job.id))
 
@@ -927,11 +1014,306 @@ class TestRunPipeline:
                 "candidate_count": 1,
             },
         )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_article_extraction_step",
+            lambda html, url: {"jsonld_fields": None, "opengraph_fields": None, "microdata_fields": None, "twitter_cards": None, "formats_found": []},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_paywall_detection_step",
+            lambda html, extraction: {"paywall_status": "free", "signals": [], "schema_accessible": None},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_metadata_profile_step",
+            lambda extraction, url: {"summary": "", "quality_score": 0.0},
+        )
 
         run_pipeline(str(job.id))
 
         publisher.refresh_from_db()
         assert publisher.name == "My Custom Name"
+
+    def test_pipeline_runs_article_steps(self, monkeypatch):
+        """Pipeline runs article steps and creates ArticleMetadata record."""
+        from publishers.pipeline.supervisor import run_pipeline
+
+        job = ResolutionJobFactory(status="pending")
+        events_published = []
+
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.publish_step_event",
+            lambda job_id, step, status, data=None: events_published.append(
+                (step, status)
+            ),
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_waf_step",
+            lambda pub: {"waf_detected": False, "waf_type": ""},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_tos_discovery_step",
+            lambda pub: {"tos_url": None},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_tos_evaluation_step",
+            lambda pub, tos_url: {"skipped": True},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_robots_step",
+            lambda pub, url: {"robots_found": False},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_ai_bot_blocking_step",
+            lambda pub, robots_result: {"robots_found": False, "bots": {}, "blocked_count": 0, "total_count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_sitemap_step",
+            lambda pub, robots_result: {"sitemap_urls": [], "source": "none", "count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor._fetch_homepage_html",
+            lambda pub: ("<html></html>", {}),
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rss_step",
+            lambda pub, html: {"feeds": [], "count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rsl_step",
+            lambda pub, robots, html, headers=None: {"rsl_detected": False, "indicators": [], "count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_publisher_details_step",
+            lambda pub, html: {"found": False, "source": None, "score": 0, "organization": None, "candidate_count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_article_extraction_step",
+            lambda html, url: {
+                "jsonld_fields": {"headline": "Test Article"},
+                "opengraph_fields": {"headline": "OG Title"},
+                "microdata_fields": None,
+                "twitter_cards": {"twitter:card": "summary"},
+                "formats_found": ["json-ld", "opengraph", "twitter-cards"],
+            },
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_paywall_detection_step",
+            lambda html, extraction: {
+                "paywall_status": "paywalled",
+                "signals": [],
+                "schema_accessible": False,
+            },
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_metadata_profile_step",
+            lambda extraction, url: {"summary": "Rich metadata profile", "quality_score": 0.9},
+        )
+
+        run_pipeline(str(job.id))
+
+        # Verify events for article steps
+        assert ("article_extraction", "started") in events_published
+        assert ("article_extraction", "completed") in events_published
+        assert ("paywall_detection", "started") in events_published
+        assert ("paywall_detection", "completed") in events_published
+        assert ("metadata_profile", "started") in events_published
+        assert ("metadata_profile", "completed") in events_published
+
+        # Verify article_result populated on job
+        job.refresh_from_db()
+        assert job.article_result is not None
+        assert job.article_result["jsonld_fields"]["headline"] == "Test Article"
+        assert job.article_result["paywall"]["paywall_status"] == "paywalled"
+        assert job.article_result["profile"]["summary"] == "Rich metadata profile"
+
+        # Verify ArticleMetadata record created
+        am = ArticleMetadata.objects.filter(resolution_job=job).first()
+        assert am is not None
+        assert am.article_url == job.canonical_url
+        assert am.has_jsonld is True
+        assert am.has_opengraph is True
+        assert am.has_twitter_cards is True
+        assert am.paywall_status == "paywalled"
+
+        # Verify publisher.has_paywall updated
+        job.publisher.refresh_from_db()
+        assert job.publisher.has_paywall is True
+
+    def test_pipeline_skips_fresh_article(self, monkeypatch):
+        """Pipeline skips article steps when article was recently analyzed."""
+        from publishers.pipeline.supervisor import run_pipeline
+
+        job = ResolutionJobFactory(status="pending")
+        events_published = []
+
+        # Create a recent ArticleMetadata for this URL
+        ArticleMetadata.objects.create(
+            resolution_job=job,
+            publisher=job.publisher,
+            article_url=job.canonical_url,
+            paywall_status="free",
+        )
+
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.publish_step_event",
+            lambda job_id, step, status, data=None: events_published.append(
+                (step, status)
+            ),
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_waf_step",
+            lambda pub: {"waf_detected": False, "waf_type": ""},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_tos_discovery_step",
+            lambda pub: {"tos_url": None},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_tos_evaluation_step",
+            lambda pub, tos_url: {"skipped": True},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_robots_step",
+            lambda pub, url: {"robots_found": False},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_ai_bot_blocking_step",
+            lambda pub, robots_result: {"robots_found": False, "bots": {}, "blocked_count": 0, "total_count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_sitemap_step",
+            lambda pub, robots_result: {"sitemap_urls": [], "source": "none", "count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor._fetch_homepage_html",
+            lambda pub: ("", {}),
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rss_step",
+            lambda pub, html: {"feeds": [], "count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rsl_step",
+            lambda pub, robots, html, headers=None: {"rsl_detected": False, "indicators": [], "count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_publisher_details_step",
+            lambda pub, html: {"found": False, "source": None, "score": 0, "organization": None, "candidate_count": 0},
+        )
+
+        extraction_called = []
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_article_extraction_step",
+            lambda html, url: extraction_called.append(True) or {"jsonld_fields": None, "opengraph_fields": None, "microdata_fields": None, "twitter_cards": None, "formats_found": []},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_paywall_detection_step",
+            lambda html, extraction: {"paywall_status": "free", "signals": [], "schema_accessible": None},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_metadata_profile_step",
+            lambda extraction, url: {"summary": "", "quality_score": 0.0},
+        )
+
+        run_pipeline(str(job.id))
+
+        # Article step functions should NOT have been called
+        assert len(extraction_called) == 0
+
+        # Article skip events should have been published
+        assert ("article_extraction", "skipped") in events_published
+        assert ("paywall_detection", "skipped") in events_published
+        assert ("metadata_profile", "skipped") in events_published
+
+    def test_pipeline_reuses_homepage_html_for_article(self, monkeypatch):
+        """Pipeline reuses homepage HTML when article URL matches homepage."""
+        from publishers.pipeline.supervisor import run_pipeline
+
+        publisher = PublisherFactory(
+            domain="example.com", name="example.com", url="https://example.com"
+        )
+        # canonical_url matches homepage
+        job = ResolutionJobFactory(
+            publisher=publisher,
+            status="pending",
+            canonical_url="https://example.com/",
+        )
+
+        fetch_calls = []
+
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.publish_step_event",
+            lambda job_id, step, status, data=None: None,
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_waf_step",
+            lambda pub: {"waf_detected": False, "waf_type": ""},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_tos_discovery_step",
+            lambda pub: {"tos_url": None},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_tos_evaluation_step",
+            lambda pub, tos_url: {"skipped": True},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_robots_step",
+            lambda pub, url: {"robots_found": False},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_ai_bot_blocking_step",
+            lambda pub, robots_result: {"robots_found": False, "bots": {}, "blocked_count": 0, "total_count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_sitemap_step",
+            lambda pub, robots_result: {"sitemap_urls": [], "source": "none", "count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor._fetch_homepage_html",
+            lambda pub: ("<html>homepage</html>", {}),
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rss_step",
+            lambda pub, html: {"feeds": [], "count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rsl_step",
+            lambda pub, robots, html, headers=None: {"rsl_detected": False, "indicators": [], "count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_publisher_details_step",
+            lambda pub, html: {"found": False, "source": None, "score": 0, "organization": None, "candidate_count": 0},
+        )
+
+        # Track fetch calls on the supervisor's _fetch_manager
+        original_fetch_manager = MagicMock()
+        original_fetch_manager.fetch.side_effect = lambda url, publisher=None: (
+            fetch_calls.append(url) or FetchResult(html="<html>fetched</html>", status_code=200, strategy_used="curl_cffi", url=url)
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor._fetch_manager",
+            original_fetch_manager,
+        )
+
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_article_extraction_step",
+            lambda html, url: {"jsonld_fields": None, "opengraph_fields": None, "microdata_fields": None, "twitter_cards": None, "formats_found": []},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_paywall_detection_step",
+            lambda html, extraction: {"paywall_status": "free", "signals": [], "schema_accessible": None},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_metadata_profile_step",
+            lambda extraction, url: {"summary": "", "quality_score": 0.0},
+        )
+
+        run_pipeline(str(job.id))
+
+        # _fetch_manager.fetch should NOT have been called for article HTML
+        # (homepage_html reused because article_url matches homepage)
+        article_fetches = [u for u in fetch_calls if "example.com/" in u and u != "https://example.com/"]
+        assert len(article_fetches) == 0
 
 
 # ---------------------------------------------------------------------------

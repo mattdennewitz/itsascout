@@ -8,20 +8,6 @@ A publisher website analysis tool where users paste a single URL and get a strea
 
 Paste a URL, get a comprehensive scraping report card — what's allowed, what's blocked, and what structured data is available — with real-time progress as each check completes.
 
-## Current Milestone: v2.0 Core Workflow
-
-**Goal:** Build the end-to-end URL analysis workflow with streaming progress, durable publisher intelligence, and a report card UI.
-
-**Target features:**
-- Single-URL entry point with real-time SSE progress
-- Resolution job pipeline (publisher resolution → discovery → article analysis)
-- Publisher report card (WAF, ToS, robots.txt, sitemap, RSS, RSL, metadata profile)
-- Article-level metadata extraction and crawl permission check
-- RQ task infrastructure in Docker
-- curl-cffi with Zyte fallback fetch strategy (remembered per publisher)
-- URL sanitization to prevent duplicates
-- Configurable publisher freshness TTL
-
 ## Requirements
 
 ### Validated
@@ -44,28 +30,31 @@ Paste a URL, get a comprehensive scraping report card — what's allowed, what's
 - ✓ Form submissions with useForm and session-based validation — v1.0
 - ✓ Deferred props and partial reloads for performance — v1.0
 - ✓ Debounced search with preserved table state — v1.0
+- ✓ Single-URL submission with job creation and UUID tracking — v2.0
+- ✓ URL sanitization and deduplication — v2.0
+- ✓ Publisher resolution by domain — v2.0
+- ✓ Publisher freshness TTL with configurable refresh interval — v2.0
+- ✓ Fetch strategy discovery (curl-cffi first, Zyte fallback, remembered per publisher) — v2.0
+- ✓ Publisher metadata profiling via LLM — v2.0
+- ✓ Structured data format detection (JSON-LD, OpenGraph, Microdata indicators) — v2.0
+- ✓ robots.txt discovery and per-URL permission checking — v2.0
+- ✓ Sitemap discovery (common patterns/filenames) — v2.0
+- ✓ RSS feed URL discovery — v2.0
+- ✓ RSL (Really Simple Licensing) indicator detection — v2.0
+- ✓ ToS/privacy discovery integrated into pipeline — v2.0
+- ✓ Article-level metadata extraction via extruct — v2.0
+- ✓ Real-time SSE progress updates during pipeline execution — v2.0
+- ✓ Report card results page (publisher + article findings at unique URL) — v2.0
+- ✓ RQ worker infrastructure in Docker Compose — v2.0
+- ✓ Existing publisher table stays as admin/management view — v2.0
+- ✓ Field-presence table showing canonical fields across metadata formats — v2.0
+- ✓ Full integration test (URL submission → pipeline → completed job) — v2.0
 
 ### Active
 
 <!-- Current scope. Building toward these. -->
 
-- Single-URL submission with job creation and UUID tracking
-- URL sanitization and deduplication
-- Publisher resolution by domain (homepage visit or LLM web search)
-- Publisher freshness TTL with configurable refresh interval
-- Fetch strategy discovery (curl-cffi first, Zyte fallback, remembered per publisher)
-- Publisher metadata profiling via LLM (article details, byline, paywall, thumbnail, etc.)
-- Structured data format detection (json-ld, opengraph, microdata yes/no indicators)
-- robots.txt discovery and per-URL permission checking
-- Sitemap discovery (common patterns/filenames)
-- RSS feed URL discovery (remember, don't crawl)
-- RSL (Really Simple Licensing) indicator detection
-- ToS/privacy discovery integrated into pipeline
-- Article-level metadata extraction via extruct
-- Real-time SSE progress updates during pipeline execution
-- Report card results page (publisher + article findings at unique URL)
-- RQ worker infrastructure in Docker Compose
-- Existing publisher table stays as admin/management view
+(None — next milestone not yet defined. Run `/gsd:new-milestone` to start.)
 
 ### Out of Scope
 
@@ -75,34 +64,28 @@ Paste a URL, get a comprehensive scraping report card — what's allowed, what's
 - Sitemap crawling — discover existence, don't parse entries
 - Mobile app — web-first approach
 - SSR setup — adds Node.js process complexity, defer until needed
-- New UI for publisher management table — current table serves admin use case
 - Batch/bulk URL analysis — single-URL flow first, batch later
 
 ## Context
 
-**Current state (post v1.0):**
-- Stack: Django 5.2 + React 19.1 + Inertia.js + Vite + TailwindCSS
-- Architecture: Django views → inertia_render() → React page components
-- Frontend: scrapegrape/frontend/ with 4 page components (Index, Create, Edit, BulkUpload)
-- Existing models: Publisher (domain, name, WAF, ToS, permissions, etc.)
-- Existing tasks: WAF scan, ToS discovery, permissions evaluation (all via Django admin actions)
-- Docker: PostgreSQL + Django, no RQ worker yet
-
-**v2.0 changes needed:**
-- New models: ResolutionJob (UUID, URL, status, progress), publisher metadata profile
-- Extend Publisher model: fetch strategy, last checked date, robots.txt, sitemap URLs, RSS URLs, RSL status, metadata capabilities
-- New services: URL sanitizer, publisher resolver, fetch strategy manager, metadata profiler
-- New infrastructure: RQ worker in Docker, Redis for queue + SSE
-- New frontend: URL entry page, streaming results page
+**Current state (post v2.0):**
+- Stack: Django 5.2 + React 19.1 + Inertia.js + Vite + TailwindCSS + Daphne ASGI
+- Architecture: Django views → inertia_render() → React page components, with SSE for real-time updates
+- Frontend: scrapegrape/frontend/ with 5 page components (Index, Create, Edit, BulkUpload, Jobs/Show)
+- Models: Publisher (domain, WAF, ToS, robots, sitemaps, RSS, RSL, fetch strategy, metadata profile), ResolutionJob (UUID, URL, status, pipeline results), ArticleMetadata
+- Pipeline: 10+ steps running sequentially in RQ worker — publisher resolution, WAF, ToS, robots.txt, sitemap, RSS, RSL, article extraction, paywall detection, metadata profiling
+- Infrastructure: Docker Compose with PostgreSQL, Redis 7, RQ worker, Daphne ASGI
+- Tests: pytest with factory patterns, mocked external services, full integration test
+- Codebase: ~7,600 LOC Python + ~3,000 LOC TypeScript
 
 ## Constraints
 
-- **Stack**: Django + React + Vite + TailwindCSS + Inertia.js (established in v1.0)
-- **Async**: RQ for task execution (already partially in place, needs Docker setup)
+- **Stack**: Django + React + Vite + TailwindCSS + Inertia.js + Daphne ASGI (established through v2.0)
+- **Async**: RQ for task execution, Redis for queue + SSE pub/sub
 - **Fetching**: curl-cffi preferred, Zyte as fallback (cost consideration)
-- **LLM**: pydantic-ai agents for publisher resolution and metadata profiling
+- **LLM**: pydantic-ai agents with GPT-4.1-nano for publisher resolution, ToS, and metadata profiling
 - **Backwards compatibility**: Existing publisher table and admin must continue working
-- **Development approach**: TDD with pytest — tests written before implementation for each pipeline step and service
+- **Development approach**: TDD with pytest — tests written before implementation
 
 ## Key Decisions
 
@@ -115,9 +98,14 @@ Paste a URL, get a comprehensive scraping report card — what's allowed, what's
 | Incremental migration (5 phases) | Allows rollback at each boundary, validates early | ✓ Good — zero blockers, zero rollbacks |
 | defer() for expensive queries | Instant initial render with loading spinner | ✓ Good — perceived performance improvement |
 | Partial reloads with only: ['publishers'] | Only refetch what changed during search | ✓ Good — reduced bandwidth, preserved state |
-| SSE for real-time progress | User sees pipeline steps complete in real time, better than polling | — Pending |
-| curl-cffi first, Zyte fallback | Minimize Zyte costs, curl-cffi handles most sites | — Pending |
-| Publisher-level metadata profiling via LLM | Human-readable "what's available" instead of raw format listing | — Pending |
+| SSE via Redis pub/sub + Daphne ASGI | Real-time progress without polling; Daphne as first INSTALLED_APPS hooks runserver | ✓ Good — seamless streaming, no separate process |
+| curl-cffi first, Zyte fallback | Minimize Zyte costs, curl-cffi handles most sites | ✓ Good — strategy remembered per publisher |
+| LLM metadata profiling (GPT-4.1-nano) | Human-readable "what's available" instead of raw format listing | ✓ Good — cheap, fast, useful summaries |
+| django-rq over django_tasks | Production-grade task queue with Redis backend and admin monitoring | ✓ Good — reliable job execution with visibility |
+| protego for robots.txt parsing | Scrapy ecosystem, wildcard support, sitemap extraction | ✓ Good — handles edge cases well |
+| extruct for structured data extraction | Extracts JSON-LD, OpenGraph, Microdata from HTML in one pass | ✓ Good — comprehensive format coverage |
+| Plain HTML form POST for URL submission | Standard form POST to /submit, redirect handled as SPA transition | ✓ Good — simple, reliable, works with CSRF |
+| Article freshness TTL separate from publisher | Articles may need re-checking more frequently than publisher metadata | ✓ Good — flexible caching granularity |
 
 ---
-*Last updated: 2026-02-13 after v2.0 milestone start*
+*Last updated: 2026-02-17 after v2.0 milestone completion*

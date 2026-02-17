@@ -4,6 +4,8 @@ import AppLayout from '@/Layouts/AppLayout'
 import { Link, router, usePage, Deferred } from '@inertiajs/react'
 import { useState, useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 
 interface Props {
     publishers: Publisher[]
@@ -12,7 +14,7 @@ interface Props {
 function LoadingSpinner() {
     return (
         <div className="flex justify-center items-center h-64">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" />
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-300" />
         </div>
     )
 }
@@ -52,53 +54,40 @@ function Index({ publishers }: Props) {
     }, [search])
 
     return (
-        <div className="container mx-auto py-10">
-            <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-2">Analyze a URL</h2>
-                <p className="text-sm text-gray-500 mb-4">
-                    Paste a URL to get a comprehensive scraping report card
-                </p>
-                <form action="/submit" method="POST" className="flex gap-3">
-                    <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
-                    <input
-                        type="url"
-                        name="url"
-                        placeholder="https://example.com/article"
-                        required
-                        className="flex-1 rounded-md border border-gray-300 px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                    />
-                    <button
-                        type="submit"
-                        className="bg-blue-600 text-white px-6 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
-                    >
-                        Analyze
-                    </button>
-                </form>
+        <div className="container mx-auto py-10 max-w-3xl">
+            <Card className="mb-6">
+                <CardHeader>
+                    <CardTitle>Analyze a URL</CardTitle>
+                    <CardDescription>
+                        Paste a URL to get a comprehensive scraping report card
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <form action="/submit" method="POST" className="flex gap-3">
+                        <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
+                        <input
+                            type="url"
+                            name="url"
+                            placeholder="https://example.com/article"
+                            required
+                            className="flex-1 rounded-md border border-gray-300 bg-background px-4 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        />
+                        <Button type="submit">Analyze</Button>
+                    </form>
+                </CardContent>
+            </Card>
+
+            <div className="mb-6">
+                <h1 className="text-2xl font-semibold">Publishers</h1>
             </div>
-            <div className="flex justify-between items-center mb-6">
-                <h1 className="text-2xl">Publishers</h1>
-                <div className="flex gap-2">
-                    <Link
-                        href="/publishers/create"
-                        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                    >
-                        Add Publisher
-                    </Link>
-                    <Link
-                        href="/publishers/bulk-upload"
-                        className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
-                    >
-                        Bulk Upload
-                    </Link>
-                </div>
-            </div>
+
             <div className="mb-4">
                 <input
                     type="text"
                     placeholder="Filter by name..."
                     value={search}
                     onChange={e => setSearch(e.target.value)}
-                    className="px-4 py-2 border rounded w-full max-w-md"
+                    className="rounded-md border border-gray-300 bg-background px-4 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring w-full max-w-md"
                 />
             </div>
             <Deferred data="publishers" fallback={<LoadingSpinner />}>

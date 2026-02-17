@@ -6,7 +6,7 @@ from django.urls import reverse, path
 from django_object_actions import DjangoObjectActions, action
 from django import forms
 import json
-from .models import Publisher, ResolutionJob, WAFReport
+from .models import ArticleMetadata, Publisher, ResolutionJob, WAFReport
 from .tasks import analyze_url
 from ingestion.services import (
     create_terms_discovery_from_url,
@@ -248,8 +248,8 @@ class WAFReportInline(admin.TabularInline):
 
 @admin.register(Publisher)
 class PublisherAdmin(DjangoObjectActions, admin.ModelAdmin):
-    list_display = ["name", "domain", "url", "detected_waf", "waf_reports_count"]
-    list_filter = ["detected_waf"]
+    list_display = ["name", "domain", "url", "waf_detected", "waf_type", "waf_reports_count"]
+    list_filter = ["waf_detected"]
     search_fields = ["name", "domain", "url"]
     actions = [
         perform_waf_scan,
@@ -443,6 +443,14 @@ class PublisherAdmin(DjangoObjectActions, admin.ModelAdmin):
             "has_change_permission": self.has_change_permission(request),
         }
         return render(request, "admin/publishers/analyze_url.html", context)
+
+
+@admin.register(ArticleMetadata)
+class ArticleMetadataAdmin(admin.ModelAdmin):
+    list_display = ["article_url", "publisher", "paywall_status", "has_jsonld", "has_opengraph", "has_microdata", "has_twitter_cards", "created_at"]
+    list_filter = ["paywall_status", "has_jsonld", "has_opengraph", "has_microdata", "has_twitter_cards"]
+    search_fields = ["article_url", "publisher__name"]
+    readonly_fields = ["id", "created_at"]
 
 
 @admin.register(WAFReport)

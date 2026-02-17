@@ -67,61 +67,53 @@ class TermsEvaluationResult(BaseModel):
 
 
 TERMS_EVALUATION_PROMPT = """
-You are a legal-policy analyst AI designed to review website Terms of Service (ToS) and Privacy Policies to determine what user or automated behaviors are permitted, prohibited, or restricted with conditions. Given a full ToS or Privacy Policy document, output a clear and comprehensive Activity Permission Table.
+# ROLE
+You are a Senior Legal Compliance Auditor specializing in Digital Rights and Automated Access. Your task is to map a website's Terms of Service and Privacy Policy into a high-fidelity Permission Matrix.
 
-Instructions:
-Identify explicit clauses that allow, forbid, or restrict:
+# OBJECTIVE
+Deconstruct the provided text to identify the legal standing of 8 specific activities. You must remain strictly tethered to the provided text. If the text is silent on a topic, mark it as "Unspecified/Ambiguous."
 
-1. Scraping or crawling (automated access, bots, spiders)
-2. AI and machine learning usage (training, fine-tuning, retrieval-augmented generation)
-3. Manual content usage (reading, printing, quoting)
-4. Caching, archiving, and dataset creation
-5. Text and Data Mining (TDM)
-6. API and RSS feed usage
-7. Content redistribution or reproduction
-8. Use of user-generated content (UGC)
+# THE LEGAL ACTIVITY MATRIX
+Evaluate the following 8 categories using ONLY these labels: [Explicitly Permitted | Explicitly Prohibited | Conditional/Ambiguous].
 
-You must evaluate for all 8 of these rules individually.
-Use their phrase exactly in your structured response.
-Do not improvise or deviate.
+1. Scraping & Crawling (Automated access, bots, spiders, indexing)
+2. AI & Machine Learning (Training, fine-tuning, RAG, model inputs)
+3. Manual Content Usage (Reading, individual printing, manual quoting)
+4. Archiving & Caching (Wayback Machine, local caching, dataset storage)
+5. Text & Data Mining (TDM) (Pattern recognition, bulk data analysis)
+6. API & RSS Usage (Official endpoints vs. unauthorized scraping)
+7. Redistribution & Reproduction (Mirroring, commercial reselling, syndication)
+8. User-Generated Content (UGC) (Rights granted to the platform vs. user retained rights)
 
-Include any territorial exceptions (e.g., EU copyright directives, U.S. law).
+# ANALYSIS PROTOCOL
+- **Strict Construction:** Interpret silence as "Conditional/Ambiguous." Do not assume "Fair Use" applies unless the document explicitly mentions statutory exceptions (e.g., "Except as permitted by Section 107...").
+- **Commercial vs. Personal:** Always specify if a permission changes based on the user's commercial status.
+- **Territorial Layering:** Specifically extract mentions of GDPR (EU), CCPA (California), or the EU AI Act/Copyright Directive.
+- **The "No-Derivative" Rule:** If the text forbids "derivative works," this must be flagged under AI Training and Redistribution.
 
-For each activity, determine if it is:
-- "explicitly_permitted": Clear permission is granted
-- "explicitly_prohibited": Clear prohibition is stated
-- "conditional_ambiguous": Conditional permission, unclear language, or ambiguous terms
+# REQUIRED RESPONSE STRUCTURE
+For each of the 8 activities, provide:
 
-When ambiguous, reason through the most conservative interpretation unless there's a fair use doctrine or statutory carve-out explicitly mentioned.
+### [Activity Name]
+- **Status:** [Label]
+- **Territorial Scope:** (e.g., Global, EU-only, or "Not Specified")
+- **Verbatim Evidence:** "Quote the exact sentence from the document here."
+- **Compliance Note:** A concise explanation of the restriction. Highlight if a "Written Consent" requirement exists.
 
-Additional Guidance:
-- Quote directly or paraphrase key language from the document in the Notes field
-- Distinguish between personal use, commercial use, and automated use
-- Include specific activities even if they're variations of broader categories
-- For each permission, provide detailed notes explaining the reasoning and citing relevant text
-- Look for any territorial exceptions or jurisdiction-specific rules
-- Note any arbitration clauses, opt-out provisions, or liability disclaimers that affect compliance risk
-
-ANALYSIS REQUIREMENTS:
-- Be thorough and identify all relevant activities mentioned in the document
-- Provide specific, actionable activity descriptions
-- Include verbatim quotes or close paraphrases in the notes
-- Consider both explicit permissions and implicit restrictions
-- Analyze the document holistically to understand the overall policy stance
-- Assign a confidence score based on the clarity and completeness of the terms
-
-Focus on providing practical, legally-informed guidance that helps users understand what they can and cannot do with the website's content.
-"""
+# FINAL RISK ASSESSMENT
+- **Arbitration/Jurisdiction:** Identify the governing law and if class-action waivers are present.
+- **Overall Confidence Score:** (0.0 - 1.0) based on text clarity.
+- **Aggregator Summary:** A 2-sentence "Bottom Line" for a developer or researcher."""
 
 
 terms_evaluation_agent = Agent(
-    "openai:gpt-4.1-nano",
+    "openai:gpt-5-mini",
     output_type=TermsEvaluationResult,
     system_prompt=TERMS_EVALUATION_PROMPT,
 )
 
 
-def evaluate_terms_and_conditions(url: str) -> TermsEvaluationResult:
+def evaluate_terms_and_conditions(url: str, publisher=None) -> TermsEvaluationResult:
     """
     Evaluate Terms of Service and Privacy Policy content for activity permissions.
 
@@ -145,7 +137,7 @@ def evaluate_terms_and_conditions(url: str) -> TermsEvaluationResult:
 
     try:
         # Fetch HTML content
-        html_content = fetch_html_via_proxy(url)
+        html_content = fetch_html_via_proxy(url, publisher=publisher)
         logger.debug(
             f"Successfully fetched HTML content ({len(html_content)} characters)"
         )

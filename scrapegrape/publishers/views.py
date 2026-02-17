@@ -2,14 +2,12 @@ import csv
 import json
 
 from django.conf import settings
-from django.db.models import Subquery, OuterRef
 from django.http import HttpResponseNotFound, StreamingHttpResponse
 from django.shortcuts import redirect, get_object_or_404
 from inertia import render as inertia_render, defer
 
-from ingestion.models import TermsDiscoveryResult, TermsEvaluationResult
-from publishers.models import Publisher, ResolutionJob, WAFReport
-from publishers.serializers import PublisherWithReportsSerializer
+from publishers.models import ArticleMetadata, Publisher, ResolutionJob
+from publishers.serializers import PublisherListSerializer
 from publishers.forms import PublisherForm, BulkUploadForm
 from publishers.tasks import analyze_url
 from publishers.url_sanitizer import sanitize_url, extract_domain
@@ -27,64 +25,35 @@ def table(request):
     search = request.GET.get('search', '')
 
     def load_publishers():
-        # Subqueries to get the latest related object IDs
-        latest_waf = Subquery(
-            WAFReport.objects.filter(publisher=OuterRef("pk"))
-            .order_by("-created_at")
-            .values("id")[:1]
-        )
-        latest_discovery = Subquery(
-            TermsDiscoveryResult.objects.filter(publisher=OuterRef("pk"))
-            .order_by("-created_at")
-            .values("id")[:1]
-        )
-        latest_evaluation = Subquery(
-            TermsEvaluationResult.objects.filter(publisher=OuterRef("pk"))
-            .order_by("-created_at")
-            .values("id")[:1]
-        )
-
-        # Annotate publishers with those latest IDs
-        publishers = Publisher.objects.annotate(
-            latest_waf_id=latest_waf,
-            latest_discovery_id=latest_discovery,
-            latest_evaluation_id=latest_evaluation,
-        )
-
-        # Apply search filter if search param exists
+        publishers = Publisher.objects.all()
         if search:
             publishers = publishers.filter(name__icontains=search)
-
-        # Get all needed related objects in bulk
-        waf_reports = WAFReport.objects.in_bulk(
-            publishers.values_list("latest_waf_id", flat=True)
-        )
-        discovery_results = TermsDiscoveryResult.objects.in_bulk(
-            publishers.values_list("latest_discovery_id", flat=True)
-        )
-        evaluation_results = TermsEvaluationResult.objects.in_bulk(
-            publishers.values_list("latest_evaluation_id", flat=True)
-        )
-
-        # Build final result
-        result = []
-        for publisher in publishers:
-            result.append(
-                {
-                    "publisher": publisher,
-                    "waf_report": waf_reports.get(publisher.latest_waf_id),
-                    "terms_discovery": discovery_results.get(publisher.latest_discovery_id),
-                    "terms_evaluation": evaluation_results.get(
-                        publisher.latest_evaluation_id
-                    ),
-                }
-            )
-
-        serialized = PublisherWithReportsSerializer(result, many=True)
-        return serialized.data
+        return PublisherListSerializer(publishers, many=True).data
 
     return inertia_render(request, 'Publishers/Index', props={
         'publishers': defer(load_publishers),
+    })
+
+
+def publisher_detail(request, publisher_id):
+    publisher = get_object_or_404(Publisher, id=publisher_id)
+    articles = ArticleMetadata.objects.filter(publisher=publisher).order_by("-created_at")[:20]
+    return inertia_render(request, 'Publishers/Detail', props={
+        'publisher': PublisherListSerializer(publisher).data,
+        'articles': [
+            {
+                "id": str(a.id),
+                "article_url": a.article_url,
+                "has_jsonld": a.has_jsonld,
+                "has_opengraph": a.has_opengraph,
+                "has_microdata": a.has_microdata,
+                "has_twitter_cards": a.has_twitter_cards,
+                "paywall_status": a.paywall_status,
+                "metadata_profile": a.metadata_profile,
+                "created_at": a.created_at.isoformat(),
+            }
+            for a in articles
+        ],
     })
 
 
@@ -219,10 +188,18 @@ def job_show(request, job_id):
                 "status": job.status,
                 "canonical_url": job.canonical_url,
                 "submitted_url": job.submitted_url,
+                "publisher_id": job.publisher.id,
                 "publisher_name": job.publisher.name,
                 "publisher_domain": job.publisher.domain,
                 "waf_result": job.waf_result,
                 "tos_result": job.tos_result,
+                "robots_result": job.robots_result,
+                "sitemap_result": job.sitemap_result,
+                "rss_result": job.rss_result,
+                "rsl_result": job.rsl_result,
+                "ai_bot_result": job.ai_bot_result,
+                "metadata_result": job.metadata_result,
+                "article_result": job.article_result,
                 "created_at": job.created_at.isoformat(),
             },
         },

@@ -2,49 +2,45 @@
 Services for translating agent results into Django models.
 """
 
-import os
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import requests
-from base64 import b64decode
 from loguru import logger
+
+from publishers.fetchers.exceptions import AllStrategiesExhausted
+from publishers.fetchers.manager import FetchStrategyManager
 from .models import TermsDiscoveryResult, TermsEvaluationResult
 from .terms_discovery import discover_terms_and_privacy
 from .terms_evaluation import evaluate_terms_and_conditions
 
+if TYPE_CHECKING:
+    from publishers.models import Publisher
 
-def fetch_html_via_proxy(url: str) -> str:
+_fetch_manager = FetchStrategyManager()
+
+
+def fetch_html_via_proxy(url: str, publisher: Publisher | None = None) -> str:
     """
-    Fetch HTML content from a given URL using Zyte API proxy.
+    Fetch HTML content from a given URL using FetchStrategyManager.
 
     Args:
         url: The URL to fetch HTML content from
+        publisher: Optional publisher for per-publisher strategy memory
 
     Returns:
         HTML content as string
 
     Raises:
-        ValueError: If ZYTE_API_KEY environment variable is not set
-        requests.RequestException: If the request fails
+        requests.RequestException: If all fetch strategies fail
     """
-    zyte_api_key = os.getenv("ZYTE_API_KEY")
-    if not zyte_api_key:
-        raise ValueError("ZYTE_API_KEY environment variable is required")
-
     try:
-        api_response = requests.post(
-            "https://api.zyte.com/v1/extract",
-            auth=(zyte_api_key, ""),
-            json={
-                "url": url,
-                "httpResponseBody": True,
-            },
-            timeout=30.0,
-        )
-        api_response.raise_for_status()
-        http_response_body: bytes = b64decode(api_response.json()["httpResponseBody"])
-        return http_response_body.decode("utf-8")
-    except requests.RequestException as e:
-        logger.error(f"Failed to fetch HTML from {url} via Zyte API: {e}")
-        raise
+        result = _fetch_manager.fetch(url, publisher=publisher)
+        return result.html
+    except AllStrategiesExhausted as e:
+        logger.error(f"Failed to fetch HTML from {url}: {e}")
+        raise requests.RequestException(str(e)) from e
 
 
 def create_terms_discovery_from_url(publisher, url):

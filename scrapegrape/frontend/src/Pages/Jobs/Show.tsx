@@ -1,12 +1,56 @@
 import { useEffect, useState, useMemo } from 'react'
-import { router } from '@inertiajs/react'
+import { Link, router } from '@inertiajs/react'
 import AppLayout from '@/Layouts/AppLayout'
+import {
+    Card,
+    CardContent,
+    CardHeader,
+    CardTitle,
+} from '@/components/ui/card'
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from '@/components/ui/table'
+import {
+    Collapsible,
+    CollapsibleContent,
+    CollapsibleTrigger,
+} from '@/components/ui/collapsible'
+import {
+    CircleCheck,
+    CircleX,
+    Shield,
+    FileText,
+    Bot,
+    Map,
+    Rss,
+    ExternalLink,
+    ChevronRight,
+    Scale,
+    FileCode,
+    Globe,
+} from 'lucide-react'
 import type { ReactNode } from 'react'
+import { StatusIndicator } from '@/components/report/StatusIndicator'
+import { PermissionStatus } from '@/components/report/PermissionStatus'
+import { UrlList } from '@/components/report/UrlList'
+import { FormatBadge } from '@/components/report/FormatBadge'
+import { PaywallBadge } from '@/components/report/PaywallBadge'
 
 interface PipelineEvent {
     step: string
     status: 'started' | 'completed' | 'failed' | 'skipped'
     data: Record<string, unknown>
+}
+
+type Permission = {
+    notes: string
+    activity: string
+    permission: 'explicitly_permitted' | 'explicitly_prohibited' | 'conditional_ambiguous'
 }
 
 interface JobProps {
@@ -15,19 +59,35 @@ interface JobProps {
         status: string
         canonical_url: string
         submitted_url: string
+        publisher_id: number
         publisher_name: string
         publisher_domain: string
         waf_result: Record<string, unknown> | null
         tos_result: Record<string, unknown> | null
+        robots_result: Record<string, unknown> | null
+        sitemap_result: Record<string, unknown> | null
+        rss_result: Record<string, unknown> | null
+        rsl_result: Record<string, unknown> | null
+        ai_bot_result: Record<string, unknown> | null
+        metadata_result: Record<string, unknown> | null
+        article_result: Record<string, unknown> | null
         created_at: string
     }
 }
 
 const PIPELINE_STEPS = [
-    { key: 'publisher_resolution', label: 'Publisher Resolution', icon: '1' },
+    { key: 'publisher_details', label: 'Publisher Details', icon: '1' },
     { key: 'waf', label: 'WAF Detection', icon: '2' },
     { key: 'tos_discovery', label: 'ToS Discovery', icon: '3' },
     { key: 'tos_evaluation', label: 'ToS Evaluation', icon: '4' },
+    { key: 'robots', label: 'robots.txt Analysis', icon: '5' },
+    { key: 'ai_bot_blocking', label: 'AI Bot Blocking', icon: '6' },
+    { key: 'sitemap', label: 'Sitemap Discovery', icon: '7' },
+    { key: 'rss', label: 'RSS Feed Discovery', icon: '8' },
+    { key: 'rsl', label: 'RSL Detection', icon: '9' },
+    { key: 'article_extraction', label: 'Article Metadata', icon: '10' },
+    { key: 'paywall_detection', label: 'Paywall Detection', icon: '11' },
+    { key: 'metadata_profile', label: 'Metadata Profile', icon: '12' },
 ] as const
 
 function statusBadge(status: string) {
@@ -49,10 +109,27 @@ function truncateUrl(url: string, maxLen = 60): string {
     return url.slice(0, maxLen) + '...'
 }
 
+function SectionPlaceholder({ label, reason }: { label: string; reason: string }) {
+    return (
+        <p className="text-sm text-muted-foreground">
+            {label}: <span className="italic">{reason}</span>
+        </p>
+    )
+}
+
 function stepDataSummary(step: string, data: Record<string, unknown>): string | null {
     if (!data || Object.keys(data).length === 0) return null
 
-    if (step === 'publisher_resolution') {
+    if (step === 'publisher_details') {
+        // Full details data (from metadata extraction)
+        if (data.found && data.organization) {
+            const org = data.organization as Record<string, unknown>
+            const name = org.name ?? 'Unknown'
+            const type = org.type ?? 'Organization'
+            return `${name} (${type}, via ${data.source})`
+        }
+        if (data.found === false) return 'No structured organization data found'
+        // Resolution data (just name/domain, shown while running)
         if (data.publisher_name) return `Resolved: ${data.publisher_name} (${data.domain ?? ''})`
         return null
     }
@@ -67,10 +144,69 @@ function stepDataSummary(step: string, data: Record<string, unknown>): string | 
         return null
     }
     if (step === 'tos_evaluation') {
+        if (data.error) return `Error: ${String(data.error)}`
         if (data.scraping_permitted !== undefined) {
             return data.scraping_permitted ? 'Scraping: Permitted' : 'Scraping: Restricted'
         }
-        if (data.permissions) return `Permissions: ${JSON.stringify(data.permissions)}`
+        if (Array.isArray(data.permissions)) {
+            const count = (data.permissions as unknown[]).length
+            return `${count} activit${count === 1 ? 'y' : 'ies'} evaluated`
+        }
+        return null
+    }
+    if (step === 'robots') {
+        if (data.robots_found === false) return 'No robots.txt found'
+        if (data.url_allowed === true) return 'URL allowed by robots.txt'
+        if (data.url_allowed === false) return 'URL disallowed by robots.txt'
+        return null
+    }
+    if (step === 'ai_bot_blocking') {
+        const blocked = data.blocked_count as number
+        const total = data.total_count as number
+        if (!data.robots_found) return 'No robots.txt available'
+        if (blocked === 0) return 'No AI bots blocked'
+        return `${blocked}/${total} AI bots blocked`
+    }
+    if (step === 'sitemap') {
+        const count = data.count as number
+        if (count > 0) return `Found ${count} sitemap(s)`
+        return 'No sitemaps found'
+    }
+    if (step === 'rss') {
+        const count = data.count as number
+        if (count > 0) return `Found ${count} feed(s)`
+        return 'No RSS/Atom feeds found'
+    }
+    if (step === 'rsl') {
+        if (data.rsl_detected) return `RSL detected (${data.count} indicator(s))`
+        return 'No RSL licensing detected'
+    }
+    if (step === 'article_extraction') {
+        const formats = data.formats_found as string[] | undefined
+        if (formats && formats.length > 0) return `Found: ${formats.join(', ')}`
+        if (data.summary) return String(data.summary)
+        return 'No structured data found'
+    }
+    if (step === 'paywall_detection') {
+        const status = data.paywall_status as string | undefined
+        if (status) {
+            const label: Record<string, string> = {
+                free: 'Free access',
+                paywalled: 'Paywalled (hard)',
+                metered: 'Metered access',
+                unknown: 'Unknown',
+            }
+            let result = label[status] ?? status
+            if (data.schema_accessible !== undefined && data.schema_accessible !== null) {
+                result += ` (isAccessibleForFree: ${data.schema_accessible})`
+            }
+            return result
+        }
+        if (data.summary) return String(data.summary)
+        return null
+    }
+    if (step === 'metadata_profile') {
+        if (data.summary) return String(data.summary)
         return null
     }
     if (data.reason) return String(data.reason)
@@ -79,7 +215,7 @@ function stepDataSummary(step: string, data: Record<string, unknown>): string | 
 }
 
 function StepCard({ step, event }: { step: typeof PIPELINE_STEPS[number]; event: PipelineEvent | undefined }) {
-    let borderClass = 'border-gray-200'
+    let borderClass = 'border-gray-300'
     let bgClass = 'bg-white'
     let textClass = 'text-gray-400'
     let statusLabel = 'Pending'
@@ -88,20 +224,20 @@ function StepCard({ step, event }: { step: typeof PIPELINE_STEPS[number]; event:
     if (event) {
         switch (event.status) {
             case 'completed':
-                borderClass = 'border-green-300'
+                borderClass = 'border-gray-300'
                 bgClass = 'bg-green-50'
                 textClass = 'text-green-800'
                 statusLabel = 'Completed'
                 break
             case 'started':
-                borderClass = 'border-blue-300'
+                borderClass = 'border-gray-300'
                 bgClass = 'bg-blue-50'
                 textClass = 'text-blue-800'
                 statusLabel = 'Running'
                 animate = 'animate-pulse'
                 break
             case 'failed':
-                borderClass = 'border-red-300'
+                borderClass = 'border-gray-300'
                 bgClass = 'bg-red-50'
                 textClass = 'text-red-800'
                 statusLabel = 'Failed'
@@ -117,6 +253,22 @@ function StepCard({ step, event }: { step: typeof PIPELINE_STEPS[number]; event:
 
     const summary = event ? stepDataSummary(step.key, event.data) : null
 
+    // Format badges for article_extraction step
+    const formatBadges = step.key === 'article_extraction' && event?.status === 'completed' ? (
+        <div className="flex items-center gap-1.5 mt-1.5">
+            {(['json-ld', 'opengraph', 'microdata', 'twitter-cards'] as const).map((fmt) => {
+                const formats = (event.data.formats_found as string[] | undefined) ?? []
+                const present = formats.includes(fmt)
+                const labels: Record<string, string> = { 'json-ld': 'JSON-LD', 'opengraph': 'OpenGraph', 'microdata': 'Microdata', 'twitter-cards': 'Twitter' }
+                return (
+                    <span key={fmt} className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${present ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-400'}`}>
+                        {labels[fmt]}
+                    </span>
+                )
+            })}
+        </div>
+    ) : null
+
     return (
         <div className={`border ${borderClass} ${bgClass} rounded-lg p-4 ${animate}`}>
             <div className="flex items-center justify-between mb-1">
@@ -131,6 +283,7 @@ function StepCard({ step, event }: { step: typeof PIPELINE_STEPS[number]; event:
             {summary && (
                 <p className={`text-xs mt-1 ${textClass}`}>{summary}</p>
             )}
+            {formatBadges}
             {event?.status === 'skipped' && !summary && (
                 <p className="text-xs mt-1 text-gray-500">Skipped (publisher recently checked)</p>
             )}
@@ -140,6 +293,441 @@ function StepCard({ step, event }: { step: typeof PIPELINE_STEPS[number]; event:
         </div>
     )
 }
+
+// ---------------------------------------------------------------------------
+// Field Presence Table (shows which canonical fields exist per format)
+// ---------------------------------------------------------------------------
+
+const CANONICAL_FIELDS = [
+    { label: 'Headline',       jsonld: 'headline',            og: 'headline',        micro: 'headline',            twitter: 'twitter:title' },
+    { label: 'Author',         jsonld: 'author',              og: 'author',          micro: 'author',              twitter: null },
+    { label: 'Date Published', jsonld: 'datePublished',       og: 'datePublished',   micro: 'datePublished',       twitter: null },
+    { label: 'Date Modified',  jsonld: 'dateModified',        og: 'dateModified',    micro: 'dateModified',        twitter: null },
+    { label: 'Image',          jsonld: 'image',               og: 'image',           micro: 'image',               twitter: 'twitter:image' },
+    { label: 'Description',    jsonld: 'description',         og: 'description',     micro: 'description',         twitter: 'twitter:description' },
+    { label: 'Language',       jsonld: 'inLanguage',          og: 'inLanguage',      micro: 'inLanguage',          twitter: null },
+    { label: 'Section',        jsonld: 'articleSection',      og: 'articleSection',  micro: 'articleSection',      twitter: null },
+    { label: 'Keywords',       jsonld: 'keywords',            og: 'keywords',        micro: 'keywords',            twitter: null },
+    { label: 'Word Count',     jsonld: 'wordCount',           og: null,              micro: 'wordCount',           twitter: null },
+    { label: 'Paywall Info',   jsonld: 'isAccessibleForFree', og: null,              micro: 'isAccessibleForFree', twitter: null },
+] as const
+
+function FieldPresenceTable({
+    jsonldFields,
+    opengraphFields,
+    microdataFields,
+    twitterCards,
+}: {
+    jsonldFields?: Record<string, unknown> | null
+    opengraphFields?: Record<string, unknown> | null
+    microdataFields?: Record<string, unknown> | null
+    twitterCards?: Record<string, unknown> | null
+}) {
+    const formats = [
+        { key: 'jsonld' as const, label: 'JSON-LD', data: jsonldFields },
+        { key: 'og' as const, label: 'OpenGraph', data: opengraphFields },
+        { key: 'micro' as const, label: 'Microdata', data: microdataFields },
+        { key: 'twitter' as const, label: 'Twitter', data: twitterCards },
+    ]
+
+    // Show table if at least one format has data, but always show all columns
+    const hasAnyData = formats.some(f => f.data != null)
+    if (!hasAnyData) return null
+
+    function hasField(data: Record<string, unknown> | null | undefined, fieldKey: string | null): boolean {
+        if (!data || fieldKey == null) return false
+        return data[fieldKey] !== undefined && data[fieldKey] !== null
+    }
+
+    return (
+        <div className="pl-6">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                Field Presence by Format
+            </p>
+            <div className="rounded-lg border border-gray-300 overflow-hidden">
+                <Table>
+                    <TableHeader>
+                        <TableRow className="bg-muted/30 hover:bg-muted/30">
+                            <TableHead className="text-sm font-medium">Field</TableHead>
+                            {formats.map(f => (
+                                <TableHead key={f.key} className="text-sm font-medium">{f.label}</TableHead>
+                            ))}
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {CANONICAL_FIELDS.map(field => (
+                            <TableRow key={field.label}>
+                                <TableCell className="text-sm font-medium">{field.label}</TableCell>
+                                {formats.map(f => (
+                                    <TableCell key={f.key} className="text-sm">
+                                        {hasField(f.data, field[f.key]) ? (
+                                            <CircleCheck className="size-4 text-green-600" />
+                                        ) : (
+                                            <CircleX className="size-4 text-red-300" />
+                                        )}
+                                    </TableCell>
+                                ))}
+                            </TableRow>
+                        ))}
+                    </TableBody>
+                </Table>
+            </div>
+        </div>
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Report Card (rendered for completed jobs)
+// ---------------------------------------------------------------------------
+
+function ReportCard({ job }: { job: JobProps['job'] }) {
+    const permissions = (job.tos_result?.permissions as Permission[] | undefined) ?? []
+    const permitted = permissions.filter(p => p.permission === 'explicitly_permitted').length
+    const prohibited = permissions.filter(p => p.permission === 'explicitly_prohibited').length
+
+    const sitemapUrls = (job.sitemap_result?.sitemap_urls as string[] | undefined) ?? []
+    const rssFeeds = (job.rss_result?.feeds as Array<{ url: string }> | undefined) ?? []
+    const rssUrls = rssFeeds.map(f => f.url)
+
+    const aiBots = (job.ai_bot_result?.bots as Record<string, { company: string; blocked: boolean }> | undefined) ?? null
+    const blockedCount = aiBots ? Object.values(aiBots).filter(b => b.blocked).length : 0
+    const totalBots = aiBots ? Object.keys(aiBots).length : 0
+
+    const ar = job.article_result as Record<string, unknown> | null
+    const formatsFound = (ar?.formats_found as string[] | undefined) ?? []
+    const paywall = ar?.paywall as Record<string, unknown> | undefined
+    const profile = ar?.profile as Record<string, unknown> | undefined
+
+    const metadata = job.metadata_result as Record<string, unknown> | null
+    const metadataOrg = metadata?.organization as Record<string, unknown> | undefined
+
+    return (
+        <div className="space-y-6">
+            {/* Publisher metadata info row */}
+            {metadata?.found && metadataOrg && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Globe className="size-3.5" />
+                    <span className="font-medium">{metadataOrg.name as string}</span>
+                    {metadataOrg.type && (
+                        <>
+                            <span className="text-border">|</span>
+                            <span>{metadataOrg.type as string}</span>
+                        </>
+                    )}
+                    {metadata.source && (
+                        <>
+                            <span className="text-border">|</span>
+                            <span className="text-xs">via {metadata.source as string}</span>
+                        </>
+                    )}
+                </div>
+            )}
+
+            {/* Status overview */}
+            <Card>
+                <div className="grid grid-cols-2 md:grid-cols-5 divide-x divide-gray-300">
+                    <StatusIndicator
+                        icon={Shield}
+                        label="WAF"
+                        value={
+                            !job.waf_result
+                                ? 'Not checked'
+                                : job.waf_result.waf_detected
+                                    ? ((job.waf_result.waf_type as string) || 'Detected')
+                                    : 'None'
+                        }
+                        tooltip={
+                            !job.waf_result
+                                ? undefined
+                                : job.waf_result.waf_detected
+                                    ? 'Web Application Firewall detected'
+                                    : 'No WAF detected'
+                        }
+                    />
+                    <StatusIndicator
+                        icon={Bot}
+                        label="Robots.txt"
+                        value={
+                            !job.robots_result
+                                ? 'Not checked'
+                                : job.robots_result.robots_found
+                                    ? 'Found'
+                                    : 'Not found'
+                        }
+                    />
+                    <StatusIndicator
+                        icon={FileText}
+                        label="ToS"
+                        value={
+                            !job.tos_result
+                                ? 'Not checked'
+                                : permissions.length === 0
+                                    ? 'No data'
+                                    : prohibited > 0
+                                        ? `${prohibited} prohibited`
+                                        : `${permitted} permitted`
+                        }
+                    />
+                    <StatusIndicator
+                        icon={Scale}
+                        label="RSL"
+                        value={
+                            !job.rsl_result
+                                ? 'Not checked'
+                                : job.rsl_result.rsl_detected
+                                    ? 'Detected'
+                                    : 'None'
+                        }
+                        tooltip={
+                            !job.rsl_result
+                                ? undefined
+                                : job.rsl_result.rsl_detected
+                                    ? 'Rights & Syndication License detected'
+                                    : 'No RSL licensing detected'
+                        }
+                    />
+                    <StatusIndicator
+                        icon={Rss}
+                        label="Feeds"
+                        value={`${job.sitemap_result?.count ?? 0} sitemaps, ${job.rss_result?.count ?? 0} RSS`}
+                    />
+                </div>
+            </Card>
+
+            {/* ToS Permissions */}
+            {!job.tos_result ? (
+                <Card>
+                    <CardHeader><CardTitle>Terms of Service</CardTitle></CardHeader>
+                    <CardContent>
+                        <SectionPlaceholder label="ToS" reason="Not checked" />
+                    </CardContent>
+                </Card>
+            ) : (
+                <Collapsible>
+                    <Card>
+                        <CollapsibleTrigger className="w-full group">
+                            <CardHeader>
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <ChevronRight className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
+                                        <CardTitle>Terms of Service</CardTitle>
+                                    </div>
+                                    {job.tos_result.tos_url && (
+                                        <a
+                                            href={job.tos_result.tos_url as string}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="text-sm text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1.5"
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
+                                            View source
+                                            <ExternalLink className="size-3" />
+                                        </a>
+                                    )}
+                                </div>
+                            </CardHeader>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                            <CardContent>
+                                {permissions.length > 0 ? (
+                                    <div className="rounded-lg border border-gray-300 overflow-hidden">
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow className="bg-muted/30 hover:bg-muted/30">
+                                                    <TableHead className="font-medium">Activity</TableHead>
+                                                    <TableHead className="font-medium w-[140px]">Status</TableHead>
+                                                    <TableHead className="font-medium">Notes</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {permissions.map((p, i) => (
+                                                    <TableRow key={i}>
+                                                        <TableCell className="font-medium">{p.activity}</TableCell>
+                                                        <TableCell><PermissionStatus permission={p.permission} /></TableCell>
+                                                        <TableCell className="text-sm text-muted-foreground">{p.notes}</TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-muted-foreground">No permissions data available.</p>
+                                )}
+                            </CardContent>
+                        </CollapsibleContent>
+                    </Card>
+                </Collapsible>
+            )}
+
+            {/* Discovery */}
+            <Collapsible>
+                <Card>
+                    <CollapsibleTrigger className="w-full group">
+                        <CardHeader>
+                            <div className="flex items-center gap-2">
+                                <ChevronRight className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
+                                <CardTitle>Discovery</CardTitle>
+                            </div>
+                        </CardHeader>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                        <CardContent className="space-y-5">
+                            <div>
+                                <div className="flex items-center gap-2 mb-2">
+                                    <Map className="size-4 text-muted-foreground" />
+                                    <h4 className="text-sm font-medium">Sitemaps</h4>
+                                    <span className="text-xs text-muted-foreground">({sitemapUrls.length})</span>
+                                </div>
+                                {job.sitemap_result ? (
+                                    <UrlList urls={sitemapUrls} />
+                                ) : (
+                                    <SectionPlaceholder label="Sitemaps" reason="Not checked" />
+                                )}
+                            </div>
+
+                            <div>
+                                <div className="flex items-center gap-2 mb-2">
+                                    <Rss className="size-4 text-muted-foreground" />
+                                    <h4 className="text-sm font-medium">RSS Feeds</h4>
+                                    <span className="text-xs text-muted-foreground">({rssUrls.length})</span>
+                                </div>
+                                {job.rss_result ? (
+                                    <UrlList urls={rssUrls} />
+                                ) : (
+                                    <SectionPlaceholder label="RSS" reason="Not checked" />
+                                )}
+                            </div>
+
+                            {aiBots && totalBots > 0 && (
+                                <div>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <Bot className="size-4 text-muted-foreground" />
+                                        <h4 className="text-sm font-medium">AI Bot Blocking</h4>
+                                        <span className="text-xs text-muted-foreground">
+                                            ({blockedCount}/{totalBots} blocked)
+                                        </span>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 pl-7">
+                                        {Object.entries(aiBots).map(([bot, info]) => (
+                                            <div key={bot} className="flex items-center gap-1.5 text-sm">
+                                                {info.blocked ? (
+                                                    <CircleX className="size-3.5 text-red-500 shrink-0" />
+                                                ) : (
+                                                    <CircleCheck className="size-3.5 text-emerald-600 shrink-0" />
+                                                )}
+                                                <span className={info.blocked ? 'text-foreground' : 'text-muted-foreground'}>
+                                                    {bot}
+                                                </span>
+                                                <span className="text-xs text-muted-foreground">({info.company})</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex items-center gap-2 pt-1">
+                                <FileText className="size-4 text-muted-foreground" />
+                                <span className="text-sm font-medium">RSL</span>
+                                <span className="text-sm text-muted-foreground">
+                                    {!job.rsl_result
+                                        ? 'Not checked'
+                                        : job.rsl_result.rsl_detected
+                                            ? `Detected${job.rsl_result.count ? ` (${job.rsl_result.count} indicator${(job.rsl_result.count as number) !== 1 ? 's' : ''})` : ''}`
+                                            : 'Not detected'
+                                    }
+                                </span>
+                            </div>
+                        </CardContent>
+                    </CollapsibleContent>
+                </Card>
+            </Collapsible>
+
+            {/* Article Analysis */}
+            <Card>
+                <CardHeader>
+                    <CardTitle>Article Analysis</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    {/* Crawl Permission */}
+                    <div className="flex items-center gap-3">
+                        <Bot className="size-4 text-muted-foreground shrink-0" />
+                        <span className="text-sm font-medium">Crawl Permission:</span>
+                        {!job.robots_result ? (
+                            <span className="text-sm text-muted-foreground italic">Not checked</span>
+                        ) : job.robots_result.url_allowed ? (
+                            <span className="inline-flex items-center gap-1.5 text-sm text-emerald-700">
+                                <CircleCheck className="size-4" />
+                                Allowed by robots.txt
+                            </span>
+                        ) : (
+                            <span className="inline-flex items-center gap-1.5 text-sm text-red-600">
+                                <CircleX className="size-4" />
+                                Disallowed by robots.txt
+                            </span>
+                        )}
+                    </div>
+
+                    {/* Paywall Status */}
+                    <div className="flex items-center gap-3">
+                        <FileText className="size-4 text-muted-foreground shrink-0" />
+                        <span className="text-sm font-medium">Paywall:</span>
+                        <PaywallBadge status={(paywall?.paywall_status as string) ?? 'unknown'} />
+                    </div>
+
+                    {/* Format Badges */}
+                    <div>
+                        <div className="flex items-center gap-2 mb-2">
+                            <FileCode className="size-4 text-muted-foreground" />
+                            <span className="text-sm font-medium">Structured Data</span>
+                        </div>
+                        {ar ? (
+                            <div className="flex items-center gap-1.5 pl-6">
+                                <FormatBadge label="JSON-LD" present={formatsFound.includes('json-ld')} />
+                                <FormatBadge label="OpenGraph" present={formatsFound.includes('opengraph')} />
+                                <FormatBadge label="Microdata" present={formatsFound.includes('microdata')} />
+                                <FormatBadge label="Twitter" present={formatsFound.includes('twitter-cards')} />
+                            </div>
+                        ) : (
+                            <SectionPlaceholder label="Article metadata" reason="Not checked" />
+                        )}
+                    </div>
+
+                    {/* Metadata Profile */}
+                    {profile?.summary && (
+                        <div>
+                            <div className="flex items-center gap-2 mb-1">
+                                <FileText className="size-4 text-muted-foreground" />
+                                <span className="text-sm font-medium">Metadata Profile</span>
+                                {profile.quality_score !== undefined && profile.quality_score !== null && (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700">
+                                        Score: {String(profile.quality_score)}
+                                    </span>
+                                )}
+                            </div>
+                            <p className="text-sm text-muted-foreground leading-relaxed pl-6">
+                                {profile.summary as string}
+                            </p>
+                        </div>
+                    )}
+
+                    {/* Field Presence Table */}
+                    {ar && (
+                        <FieldPresenceTable
+                            jsonldFields={ar.jsonld_fields as Record<string, unknown> | null}
+                            opengraphFields={ar.opengraph_fields as Record<string, unknown> | null}
+                            microdataFields={ar.microdata_fields as Record<string, unknown> | null}
+                            twitterCards={ar.twitter_cards as Record<string, unknown> | null}
+                        />
+                    )}
+                </CardContent>
+            </Card>
+        </div>
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Step Cards (rendered for running/pending/failed jobs)
+// ---------------------------------------------------------------------------
 
 const MAX_RETRIES = 5
 
@@ -154,11 +742,19 @@ function Show({ job }: JobProps) {
 
         const statuses: Record<string, PipelineEvent> = {}
 
-        // Publisher resolution is always completed for finished jobs
-        statuses['publisher_resolution'] = {
-            step: 'publisher_resolution',
-            status: 'completed',
-            data: { publisher_name: job.publisher_name, domain: job.publisher_domain },
+        // Publisher details: use metadata_result if available, otherwise just name/domain
+        if (job.metadata_result) {
+            statuses['publisher_details'] = {
+                step: 'publisher_details',
+                status: 'completed',
+                data: job.metadata_result,
+            }
+        } else {
+            statuses['publisher_details'] = {
+                step: 'publisher_details',
+                status: 'completed',
+                data: { publisher_name: job.publisher_name, domain: job.publisher_domain },
+            }
         }
 
         if (job.waf_result) {
@@ -183,6 +779,64 @@ function Show({ job }: JobProps) {
                     step: 'tos_evaluation',
                     status: 'completed',
                     data: job.tos_result,
+                }
+            }
+        }
+
+        if (job.robots_result) {
+            statuses['robots'] = { step: 'robots', status: 'completed', data: job.robots_result }
+        }
+        if (job.sitemap_result) {
+            statuses['sitemap'] = { step: 'sitemap', status: 'completed', data: job.sitemap_result }
+        }
+        if (job.rss_result) {
+            statuses['rss'] = { step: 'rss', status: 'completed', data: job.rss_result }
+        }
+        if (job.rsl_result) {
+            statuses['rsl'] = { step: 'rsl', status: 'completed', data: job.rsl_result }
+        }
+        if (job.ai_bot_result) {
+            statuses['ai_bot_blocking'] = { step: 'ai_bot_blocking', status: 'completed', data: job.ai_bot_result }
+        }
+        if (job.article_result) {
+            const ar = job.article_result as Record<string, unknown>
+            statuses['article_extraction'] = {
+                step: 'article_extraction',
+                status: 'completed',
+                data: {
+                    formats_found: ar.formats_found,
+                    jsonld_fields: ar.jsonld_fields,
+                    opengraph_fields: ar.opengraph_fields,
+                    microdata_fields: ar.microdata_fields,
+                    twitter_cards: ar.twitter_cards,
+                },
+            }
+            const paywall = ar.paywall as Record<string, unknown> | undefined
+            if (paywall) {
+                statuses['paywall_detection'] = {
+                    step: 'paywall_detection',
+                    status: 'completed',
+                    data: paywall,
+                }
+            }
+            const profile = ar.profile as Record<string, unknown> | undefined
+            if (profile) {
+                statuses['metadata_profile'] = {
+                    step: 'metadata_profile',
+                    status: 'completed',
+                    data: profile,
+                }
+            }
+        }
+        // For completed jobs, any step without result data was skipped (freshness TTL)
+        if (job.status === 'completed') {
+            for (const step of PIPELINE_STEPS) {
+                if (!statuses[step.key]) {
+                    statuses[step.key] = {
+                        step: step.key,
+                        status: 'skipped',
+                        data: { reason: 'fresh' },
+                    }
                 }
             }
         }
@@ -239,9 +893,10 @@ function Show({ job }: JobProps) {
     }, [job.id, job.status])
 
     const isActive = job.status === 'pending' || job.status === 'running'
+    const isCompleted = job.status === 'completed'
 
     return (
-        <div className="container mx-auto py-10 max-w-2xl">
+        <div className={`container mx-auto py-10 ${isCompleted ? 'max-w-4xl' : 'max-w-2xl'}`}>
             {/* Header */}
             <div className="mb-6">
                 <div className="flex items-center gap-3 mb-2">
@@ -252,7 +907,17 @@ function Show({ job }: JobProps) {
                 </div>
                 <div className="flex items-center gap-3 text-sm text-gray-500">
                     {job.publisher_name && (
-                        <span>{job.publisher_name}</span>
+                        isCompleted ? (
+                            <Link
+                                href={`/publishers/${job.publisher_id}`}
+                                className="hover:text-foreground transition-colors inline-flex items-center gap-1"
+                            >
+                                {job.publisher_name}
+                                <ChevronRight className="size-3" />
+                            </Link>
+                        ) : (
+                            <span>{job.publisher_name}</span>
+                        )
                     )}
                     {job.publisher_domain && (
                         <span className="text-gray-400">{job.publisher_domain}</span>
@@ -278,16 +943,32 @@ function Show({ job }: JobProps) {
                 </div>
             </div>
 
-            {/* Step Cards */}
-            <div className="space-y-3">
-                {PIPELINE_STEPS.map((step) => (
-                    <StepCard
-                        key={step.key}
-                        step={step}
-                        event={mergedStatuses[step.key]}
-                    />
-                ))}
-            </div>
+            {/* Completed: Report Card | Running/Pending/Failed: Step Cards */}
+            {isCompleted ? (
+                <ReportCard job={job} />
+            ) : (
+                <div className="space-y-3">
+                    {PIPELINE_STEPS.slice(0, 9).map((step) => (
+                        <StepCard
+                            key={step.key}
+                            step={step}
+                            event={mergedStatuses[step.key]}
+                        />
+                    ))}
+
+                    <div className="pt-2 pb-1">
+                        <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide">Article Analysis</h3>
+                    </div>
+
+                    {PIPELINE_STEPS.slice(9).map((step) => (
+                        <StepCard
+                            key={step.key}
+                            step={step}
+                            event={mergedStatuses[step.key]}
+                        />
+                    ))}
+                </div>
+            )}
 
             {/* Submitted URL (if different from canonical) */}
             {job.submitted_url !== job.canonical_url && (

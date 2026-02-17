@@ -9,8 +9,6 @@ class Publisher(models.Model):
     # Existing fields
     name = models.CharField(max_length=255)
     url = models.URLField()
-    detected_waf = models.CharField(max_length=255, blank=True, null=True)
-
     # NEW: Canonical domain for publisher lookup (one domain = one publisher)
     domain = models.CharField(max_length=255, unique=True, db_index=True, default="")
 
@@ -20,10 +18,12 @@ class Publisher(models.Model):
     tos_url = models.URLField(blank=True, default="")
     tos_permissions = models.JSONField(null=True, blank=True)
     robots_txt_found = models.BooleanField(null=True)
-    robots_txt_url_allowed = models.BooleanField(null=True)
     sitemap_urls = models.JSONField(default=list, blank=True)
     rss_urls = models.JSONField(default=list, blank=True)
     rsl_detected = models.BooleanField(null=True)
+    ai_bot_blocks = models.JSONField(null=True, blank=True)
+    publisher_details = models.JSONField(null=True, blank=True)
+    has_paywall = models.BooleanField(null=True)
 
     # NEW: Remembered fetch strategy (populated by FetchStrategyManager)
     FETCH_STRATEGY_CHOICES = [
@@ -78,11 +78,6 @@ class WAFReport(models.Model):
             trigger_url=report_data.get("trigger_url"),
         )
 
-        # Update publisher's detected_waf field if WAF was detected
-        if waf_report.detected:
-            publisher.detected_waf = waf_report.firewall
-            publisher.save()
-
         return waf_report
 
 
@@ -113,7 +108,9 @@ class ResolutionJob(models.Model):
     sitemap_result = models.JSONField(null=True, blank=True)
     rss_result = models.JSONField(null=True, blank=True)
     rsl_result = models.JSONField(null=True, blank=True)
+    ai_bot_result = models.JSONField(null=True, blank=True)
     metadata_result = models.JSONField(null=True, blank=True)
+    article_result = models.JSONField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -124,3 +121,52 @@ class ResolutionJob(models.Model):
 
     def __str__(self):
         return f"Job {self.id} - {self.canonical_url} ({self.status})"
+
+
+class ArticleMetadata(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    resolution_job = models.ForeignKey(
+        "ResolutionJob", on_delete=models.CASCADE, related_name="article_metadata"
+    )
+    publisher = models.ForeignKey(
+        "Publisher", on_delete=models.CASCADE, related_name="article_metadata"
+    )
+    article_url = models.URLField(db_index=True)
+
+    # Per-format extracted fields
+    jsonld_fields = models.JSONField(null=True, blank=True)
+    opengraph_fields = models.JSONField(null=True, blank=True)
+    microdata_fields = models.JSONField(null=True, blank=True)
+    twitter_cards = models.JSONField(null=True, blank=True)
+
+    # Format presence booleans
+    has_jsonld = models.BooleanField(default=False)
+    has_opengraph = models.BooleanField(default=False)
+    has_microdata = models.BooleanField(default=False)
+    has_twitter_cards = models.BooleanField(default=False)
+
+    # Paywall status
+    PAYWALL_CHOICES = [
+        ("free", "Free"),
+        ("paywalled", "Paywalled (hard)"),
+        ("metered", "Metered"),
+        ("unknown", "Unknown"),
+    ]
+    paywall_status = models.CharField(
+        max_length=20, choices=PAYWALL_CHOICES, default="unknown"
+    )
+    paywall_signals = models.JSONField(default=list, blank=True)
+
+    # LLM metadata profile
+    metadata_profile = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["article_url"]),
+            models.Index(fields=["publisher", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"ArticleMetadata {self.article_url} ({self.paywall_status})"

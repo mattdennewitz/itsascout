@@ -1,40 +1,16 @@
 from rest_framework import serializers
 
-from publishers.models import Publisher, WAFReport
-from ingestion.models import TermsDiscoveryResult, TermsEvaluationResult
+from publishers.models import Publisher
 
 
-class WAFReportSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = WAFReport
-        fields = ("firewall", "manufacturer", "detected")
-
-
-class TermsDiscoveryResultSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = TermsDiscoveryResult
-        fields = ("terms_of_service_url",)
-
-
-class TermsEvaluationResultSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = TermsEvaluationResult
-        fields = (
-            "permissions",
-            "territorial_exceptions",
-            "arbitration_clauses",
-            "document_type",
-        )
-
-
-class PublisherSerializer(serializers.ModelSerializer):
+class PublisherListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Publisher
-        fields = ("id", "name", "domain", "url", "detected_waf")
-
-
-class PublisherWithReportsSerializer(serializers.Serializer):
-    publisher = PublisherSerializer()
-    waf_report = WAFReportSerializer()
-    terms_discovery = TermsDiscoveryResultSerializer()
-    terms_evaluation = TermsEvaluationResultSerializer()
+        fields = (
+            "id", "name", "domain", "url",
+            "waf_detected", "waf_type",
+            "tos_url", "tos_permissions",
+            "robots_txt_found",
+            "sitemap_urls", "rss_urls", "rsl_detected", "ai_bot_blocks",
+            "fetch_strategy", "last_checked_at",
+        )

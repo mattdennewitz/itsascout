@@ -99,9 +99,6 @@ def run_pipeline(job_id: str):
             publish_step_event(job_id, "rss", "skipped", {"reason": "fresh"})
             publish_step_event(job_id, "rsl", "skipped", {"reason": "fresh"})
             publish_step_event(job_id, "publisher_details", "skipped", {"reason": "fresh"})
-            publish_step_event(job_id, "article_extraction", "skipped", {"reason": "fresh"})
-            publish_step_event(job_id, "paywall_detection", "skipped", {"reason": "fresh"})
-            publish_step_event(job_id, "metadata_profile", "skipped", {"reason": "fresh"})
         else:
             # Step 1: WAF check
             publish_step_event(job_id, "waf", "started")

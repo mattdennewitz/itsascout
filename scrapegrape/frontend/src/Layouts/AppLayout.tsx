@@ -36,7 +36,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             <nav className="border-b border-gray-300 bg-background">
                 <div className="container mx-auto px-4 py-3 flex items-center justify-between">
                     <Link href="/" className="text-lg font-bold text-foreground hover:text-foreground/80">
-                        Scrapegrape
+                        Scrape Ape
                     </Link>
                     <div className="flex items-center gap-2">
                         <Button variant="ghost" size="sm" asChild>

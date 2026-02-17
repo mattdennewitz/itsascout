@@ -5,7 +5,9 @@ This module provides functionality to discover and extract Terms of Service
 and Privacy Policy URLs from website HTML content using pydantic-ai.
 """
 
+from html.parser import HTMLParser
 from typing import Optional
+
 from pydantic import BaseModel, Field, HttpUrl
 from pydantic_ai import Agent
 from loguru import logger
@@ -33,32 +35,73 @@ class TermsDiscoveryResult(BaseModel):
 
 TERMS_DISCOVERY_PROMPT = """
 ## ROLE
-You are an expert Web Scraper and Legal Document Classifier. Your sole purpose is to extract the authoritative "Terms of Service" URL from raw HTML content.
+You are an expert Legal Document Classifier. Your sole purpose is to identify the authoritative "Terms of Service" URL from a list of links extracted from a webpage.
 
 ## TASK
-Analyze the provided HTML and identify the primary URL for the Terms of Service (ToS). 
+You will receive a list of links (href + text) extracted from a webpage. Identify the primary Terms of Service (ToS) URL.
 
 ### 1. Recognition Patterns
-Look for <a> tags where the text or href attribute contains:
+Look for links where the text or href contains:
 - "Terms of Service", "ToS", "Terms of Use", "Terms & Conditions", "User Agreement", "Legal"
 - **Exclude:** Privacy Policy, Cookie Policy, GDPR, or Data Processing Agreements.
 
-### 2. Structural Priority
-Weight your confidence based on where the link is found:
-- **Highest Priority:** Footer `<footer>` or a `<nav>` specifically labeled "Legal" or "Site Map".
-- **Secondary:** Header navigation or account registration areas.
-- **Low Priority:** Generic mentions within body paragraphs or blog posts.
-
-### 3. URL Construction Rules
+### 2. URL Construction Rules
 - **Absolute URLs:** Return as-is.
-- **Relative URLs:** If the provided context includes a base domain [INSERT BASE URL HERE], prepend it to the path (e.g., `/terms` becomes `https://example.com/terms`).
-- **Javascript/Anchors:** If a link is a javascript void or a hashtag `#`, attempt to find the source in data-attributes or ignore it.
+- **Relative URLs:** Prepend the base URL provided in the message (e.g., `/terms` becomes `https://example.com/terms`).
+- **Javascript/Anchors:** Ignore javascript: or # links.
 
 ## NEGATIVE CONSTRAINTS
 - DO NOT return a Privacy Policy URL.
-- DO NOT invent a URL if it is not explicitly in the HTML.
+- DO NOT invent a URL if it is not in the provided links.
 - DO NOT return relative paths; they must be fully qualified.
 """
+
+
+class _LinkExtractor(HTMLParser):
+    """Extract <a> tags with their href and visible text."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.links: list[dict] = []
+        self._current_href: str | None = None
+        self._current_text: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "a":
+            attr_dict = {k.lower(): (v or "") for k, v in attrs}
+            href = attr_dict.get("href", "")
+            if href:
+                self._current_href = href
+                self._current_text = []
+
+    def handle_data(self, data: str) -> None:
+        if self._current_href is not None:
+            self._current_text.append(data.strip())
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "a" and self._current_href is not None:
+            text = " ".join(t for t in self._current_text if t)
+            self.links.append({"href": self._current_href, "text": text})
+            self._current_href = None
+            self._current_text = []
+
+
+def _extract_links(html: str) -> str:
+    """Parse HTML and return a compact text listing of all <a> links."""
+    parser = _LinkExtractor()
+    try:
+        parser.feed(html)
+    except Exception:
+        return ""
+    lines = []
+    for link in parser.links:
+        href = link["href"]
+        text = link["text"]
+        if text:
+            lines.append(f"{href} | {text}")
+        else:
+            lines.append(href)
+    return "\n".join(lines)
 
 
 terms_discovery_agent = Agent(
@@ -98,10 +141,16 @@ def discover_terms_and_privacy(url: str, publisher=None) -> TermsDiscoveryResult
             f"Successfully fetched HTML content ({len(html_content)} characters)"
         )
 
+        # Extract just the links to avoid sending massive HTML to the LLM
+        links_text = _extract_links(html_content)
+        logger.debug(
+            f"Extracted links ({len(links_text)} characters from {len(html_content)} chars HTML)"
+        )
+
         # Analyze with pydantic-ai agent
         result = terms_discovery_agent.run_sync(
-            f"Analyze this HTML content to find Terms of Service URLs. "
-            f"Base URL for relative links: {url}\n\nHTML Content:\n{html_content}"
+            f"Find the Terms of Service URL from these links extracted from {url}.\n"
+            f"Base URL for relative links: {url}\n\nLinks (href | text):\n{links_text}"
         )
 
         logger.info(f"Terms discovery completed for {url}")

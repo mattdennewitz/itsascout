@@ -9,6 +9,13 @@ import {
 } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
+import {
+  CircleCheck,
+  CircleX,
+  CircleMinus,
+  ShieldAlert,
+  ShieldOff,
+} from "lucide-react"
 import type { Publisher, Permission } from "@/datatable/columns"
 
 function permissionLabel(status: Permission["permission"]) {
@@ -37,6 +44,10 @@ export function PublisherSheet({ publisher }: { publisher: Publisher }) {
   const prohibited = permissions.filter(p => p.permission === "explicitly_prohibited").length
   const conditional = permissions.filter(p => p.permission === "conditional_ambiguous").length
 
+  const bots = publisher.ai_bot_blocks
+  const botEntries = bots ? Object.entries(bots) : []
+  const blockedCount = botEntries.filter(([, b]) => b.blocked).length
+
   return (
     <Sheet>
       <SheetTrigger asChild>
@@ -52,10 +63,17 @@ export function PublisherSheet({ publisher }: { publisher: Publisher }) {
           {/* WAF */}
           <div>
             <h4 className="text-sm font-medium mb-2">WAF Detection</h4>
-            <StatusRow
-              label="Status"
-              value={publisher.waf_detected ? (publisher.waf_type || "Detected") : "None"}
-            />
+            {publisher.waf_detected ? (
+              <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+                <ShieldAlert className="size-4 text-amber-600 shrink-0" />
+                <span className="text-sm font-medium text-amber-900">{publisher.waf_type || "Detected"}</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+                <ShieldOff className="size-4 text-muted-foreground shrink-0" />
+                <span className="text-sm text-muted-foreground">No WAF detected</span>
+              </div>
+            )}
           </div>
 
           <Separator />
@@ -86,25 +104,43 @@ export function PublisherSheet({ publisher }: { publisher: Publisher }) {
 
           <Separator />
 
-          {/* Robots */}
+          {/* Robots.txt + AI Bot Blocking */}
           <div>
             <h4 className="text-sm font-medium mb-2">Robots.txt</h4>
-            <StatusRow
-              label="Found"
-              value={
-                publisher.robots_txt_found === null
-                  ? <span className="text-muted-foreground">Unknown</span>
-                  : publisher.robots_txt_found ? "Yes" : "No"
-              }
-            />
-            <StatusRow
-              label="URL Allowed"
-              value={
-                publisher.robots_txt_url_allowed === null
-                  ? <span className="text-muted-foreground">Unknown</span>
-                  : publisher.robots_txt_url_allowed ? "Yes" : "No"
-              }
-            />
+            {publisher.robots_txt_found === null ? (
+              <p className="text-sm text-muted-foreground">Not yet checked</p>
+            ) : !publisher.robots_txt_found ? (
+              <p className="text-sm text-muted-foreground">No robots.txt found</p>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 mb-3">
+                  <CircleCheck className="size-4 text-emerald-600 shrink-0" />
+                  <span className="text-sm">robots.txt found</span>
+                </div>
+                {botEntries.length > 0 && (
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">AI Bot Blocking</span>
+                      <span className="text-xs text-muted-foreground">{blockedCount}/{botEntries.length} blocked</span>
+                    </div>
+                    <div className="space-y-0.5">
+                      {botEntries.map(([bot, info]) => (
+                        <div key={bot} className="flex items-center justify-between py-0.5">
+                          <span className="text-sm">
+                            {bot} <span className="text-muted-foreground text-xs">({info.company})</span>
+                          </span>
+                          {info.blocked ? (
+                            <CircleX className="size-3.5 text-red-500" />
+                          ) : (
+                            <CircleMinus className="size-3.5 text-gray-300" />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           <Separator />

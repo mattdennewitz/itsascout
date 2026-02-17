@@ -54,7 +54,7 @@ function Index({ publishers }: Props) {
     }, [search])
 
     return (
-        <div className="container mx-auto py-10">
+        <div className="container mx-auto py-10 max-w-3xl">
             <Card className="mb-6">
                 <CardHeader>
                     <CardTitle>Analyze a URL</CardTitle>

@@ -200,6 +200,22 @@ function StepCard({ step, event }: { step: typeof PIPELINE_STEPS[number]; event:
 
     const summary = event ? stepDataSummary(step.key, event.data) : null
 
+    // Format badges for article_extraction step
+    const formatBadges = step.key === 'article_extraction' && event?.status === 'completed' ? (
+        <div className="flex items-center gap-1.5 mt-1.5">
+            {(['json-ld', 'opengraph', 'microdata', 'twitter-cards'] as const).map((fmt) => {
+                const formats = (event.data.formats_found as string[] | undefined) ?? []
+                const present = formats.includes(fmt)
+                const labels: Record<string, string> = { 'json-ld': 'JSON-LD', 'opengraph': 'OpenGraph', 'microdata': 'Microdata', 'twitter-cards': 'Twitter' }
+                return (
+                    <span key={fmt} className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${present ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-400'}`}>
+                        {labels[fmt]}
+                    </span>
+                )
+            })}
+        </div>
+    ) : null
+
     return (
         <div className={`border ${borderClass} ${bgClass} rounded-lg p-4 ${animate}`}>
             <div className="flex items-center justify-between mb-1">
@@ -214,6 +230,7 @@ function StepCard({ step, event }: { step: typeof PIPELINE_STEPS[number]; event:
             {summary && (
                 <p className={`text-xs mt-1 ${textClass}`}>{summary}</p>
             )}
+            {formatBadges}
             {event?.status === 'skipped' && !summary && (
                 <p className="text-xs mt-1 text-gray-500">Skipped (publisher recently checked)</p>
             )}

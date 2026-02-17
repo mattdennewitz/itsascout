@@ -13,6 +13,7 @@ dependencies = [
     "django-rq>=3.2.2",
     "django-vite>=3.1.0",
     "djangorestframework>=3.16.0",
+    "extruct>=0.18.0",
     "factory-boy>=3.3.3",
     "httpx>=0.28.1",
     "inertia-django>=1.2.0",

@@ -20,7 +20,7 @@ export type Publisher = {
   tos_url: string
   tos_permissions: Permission[] | null
   robots_txt_found: boolean | null
-  robots_txt_url_allowed: boolean | null
+  ai_bot_blocks: Record<string, { company: string; blocked: boolean }> | null
   sitemap_urls: string[]
   rss_urls: string[]
   rsl_detected: boolean | null

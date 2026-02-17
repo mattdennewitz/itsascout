@@ -6,7 +6,7 @@ from django.http import HttpResponseNotFound, StreamingHttpResponse
 from django.shortcuts import redirect, get_object_or_404
 from inertia import render as inertia_render, defer
 
-from publishers.models import Publisher, ResolutionJob
+from publishers.models import ArticleMetadata, Publisher, ResolutionJob
 from publishers.serializers import PublisherListSerializer
 from publishers.forms import PublisherForm, BulkUploadForm
 from publishers.tasks import analyze_url
@@ -37,8 +37,23 @@ def table(request):
 
 def publisher_detail(request, publisher_id):
     publisher = get_object_or_404(Publisher, id=publisher_id)
+    articles = ArticleMetadata.objects.filter(publisher=publisher).order_by("-created_at")[:20]
     return inertia_render(request, 'Publishers/Detail', props={
-        'publisher': PublisherListSerializer(publisher).data
+        'publisher': PublisherListSerializer(publisher).data,
+        'articles': [
+            {
+                "id": str(a.id),
+                "article_url": a.article_url,
+                "has_jsonld": a.has_jsonld,
+                "has_opengraph": a.has_opengraph,
+                "has_microdata": a.has_microdata,
+                "has_twitter_cards": a.has_twitter_cards,
+                "paywall_status": a.paywall_status,
+                "metadata_profile": a.metadata_profile,
+                "created_at": a.created_at.isoformat(),
+            }
+            for a in articles
+        ],
     })
 
 

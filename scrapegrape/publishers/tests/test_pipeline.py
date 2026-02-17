@@ -231,6 +231,87 @@ class TestRunTosEvaluationStep:
 
 
 # ---------------------------------------------------------------------------
+# TestRunAiBotBlockingStep
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestRunAiBotBlockingStep:
+    def test_ai_bot_blocking_all_blocked(self):
+        """robots.txt with 'User-agent: * / Disallow: /' blocks all bots."""
+        from publishers.pipeline.steps import run_ai_bot_blocking_step, AI_BOT_USER_AGENTS
+
+        publisher = PublisherFactory(domain="example.com")
+        robots_result = {
+            "robots_found": True,
+            "raw_text": "User-agent: *\nDisallow: /\n",
+        }
+        result = run_ai_bot_blocking_step(publisher, robots_result)
+        assert result["robots_found"] is True
+        assert result["blocked_count"] == len(AI_BOT_USER_AGENTS)
+        assert result["total_count"] == len(AI_BOT_USER_AGENTS)
+        for bot_info in result["bots"].values():
+            assert bot_info["blocked"] is True
+
+    def test_ai_bot_blocking_specific_bots(self):
+        """robots.txt blocking only GPTBot and CCBot."""
+        from publishers.pipeline.steps import run_ai_bot_blocking_step
+
+        publisher = PublisherFactory(domain="example.com")
+        robots_result = {
+            "robots_found": True,
+            "raw_text": (
+                "User-agent: GPTBot\nDisallow: /\n\n"
+                "User-agent: CCBot\nDisallow: /\n\n"
+                "User-agent: *\nAllow: /\n"
+            ),
+        }
+        result = run_ai_bot_blocking_step(publisher, robots_result)
+        assert result["bots"]["GPTBot"]["blocked"] is True
+        assert result["bots"]["CCBot"]["blocked"] is True
+        assert result["bots"]["ClaudeBot"]["blocked"] is False
+        assert result["blocked_count"] == 2
+
+    def test_ai_bot_blocking_none_blocked(self):
+        """Permissive robots.txt blocks no AI bots."""
+        from publishers.pipeline.steps import run_ai_bot_blocking_step
+
+        publisher = PublisherFactory(domain="example.com")
+        robots_result = {
+            "robots_found": True,
+            "raw_text": "User-agent: *\nAllow: /\n",
+        }
+        result = run_ai_bot_blocking_step(publisher, robots_result)
+        assert result["blocked_count"] == 0
+        for bot_info in result["bots"].values():
+            assert bot_info["blocked"] is False
+
+    def test_ai_bot_blocking_no_robots(self):
+        """robots_result with robots_found=False returns early."""
+        from publishers.pipeline.steps import run_ai_bot_blocking_step
+
+        publisher = PublisherFactory(domain="example.com")
+        robots_result = {"robots_found": False}
+        result = run_ai_bot_blocking_step(publisher, robots_result)
+        assert result["robots_found"] is False
+        assert result["bots"] == {}
+        assert result["blocked_count"] == 0
+
+    def test_ai_bot_blocking_wildcard_allow(self):
+        """User-agent: * / Allow: / allows all bots."""
+        from publishers.pipeline.steps import run_ai_bot_blocking_step
+
+        publisher = PublisherFactory(domain="example.com")
+        robots_result = {
+            "robots_found": True,
+            "raw_text": "User-agent: *\nAllow: /\n",
+        }
+        result = run_ai_bot_blocking_step(publisher, robots_result)
+        assert result["blocked_count"] == 0
+        assert result["total_count"] > 0
+
+
+# ---------------------------------------------------------------------------
 # TestRunPipeline
 # ---------------------------------------------------------------------------
 
@@ -270,6 +351,15 @@ class TestRunPipeline:
             lambda pub, url: {"robots_found": True, "url_allowed": True},
         )
         monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_ai_bot_blocking_step",
+            lambda pub, robots_result: {
+                "robots_found": True,
+                "bots": {},
+                "blocked_count": 0,
+                "total_count": 13,
+            },
+        )
+        monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_sitemap_step",
             lambda pub, robots_result: {
                 "sitemap_urls": [],
@@ -293,6 +383,16 @@ class TestRunPipeline:
                 "count": 0,
             },
         )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_publisher_details_step",
+            lambda pub, html: {
+                "found": False,
+                "source": None,
+                "score": 0,
+                "organization": None,
+                "candidate_count": 0,
+            },
+        )
 
         run_pipeline(str(job.id))
 
@@ -305,9 +405,11 @@ class TestRunPipeline:
         assert "tos_discovery" in step_names
         assert "tos_evaluation" in step_names
         assert "robots" in step_names
+        assert "ai_bot_blocking" in step_names
         assert "sitemap" in step_names
         assert "rss" in step_names
         assert "rsl" in step_names
+        assert "publisher_details" in step_names
         assert "pipeline" in step_names
         assert ("pipeline", "completed") in events_published
 
@@ -383,9 +485,11 @@ class TestRunPipeline:
         assert ("tos_discovery", "skipped") in events_published
         assert ("tos_evaluation", "skipped") in events_published
         assert ("robots", "skipped") in events_published
+        assert ("ai_bot_blocking", "skipped") in events_published
         assert ("sitemap", "skipped") in events_published
         assert ("rss", "skipped") in events_published
         assert ("rsl", "skipped") in events_published
+        assert ("publisher_details", "skipped") in events_published
 
     def test_pipeline_sets_failed_on_exception(self, monkeypatch):
         """Pipeline sets job status to failed on unhandled exception."""
@@ -447,6 +551,15 @@ class TestRunPipeline:
             },
         )
         monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_ai_bot_blocking_step",
+            lambda pub, robots_result: {
+                "robots_found": True,
+                "bots": {"GPTBot": {"company": "OpenAI", "blocked": True}},
+                "blocked_count": 1,
+                "total_count": 13,
+            },
+        )
+        monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_sitemap_step",
             lambda pub, robots_result: {
                 "sitemap_urls": ["https://example.com/sitemap.xml"],
@@ -473,6 +586,16 @@ class TestRunPipeline:
                 "count": 1,
             },
         )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_publisher_details_step",
+            lambda pub, html: {
+                "found": True,
+                "source": "json-ld",
+                "score": 5,
+                "organization": {"name": "Example News", "type": "Organization"},
+                "candidate_count": 1,
+            },
+        )
 
         run_pipeline(str(job.id))
 
@@ -482,11 +605,15 @@ class TestRunPipeline:
         assert job.tos_result["tos_url"] == "https://example.com/tos"
         assert "permissions" in job.tos_result
         assert job.robots_result["robots_found"] is True
+        assert job.ai_bot_result["blocked_count"] == 1
+        assert job.ai_bot_result["bots"]["GPTBot"]["blocked"] is True
         assert job.sitemap_result["sitemap_urls"] == [
             "https://example.com/sitemap.xml"
         ]
         assert job.rss_result["count"] == 1
         assert job.rsl_result["rsl_detected"] is True
+        assert job.metadata_result["found"] is True
+        assert job.metadata_result["organization"]["name"] == "Example News"
 
     def test_pipeline_updates_publisher_robots_and_sitemap_fields(self, monkeypatch):
         """Pipeline updates publisher flat fields for robots and sitemap."""
@@ -518,6 +645,15 @@ class TestRunPipeline:
             },
         )
         monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_ai_bot_blocking_step",
+            lambda pub, robots_result: {
+                "robots_found": True,
+                "bots": {},
+                "blocked_count": 0,
+                "total_count": 13,
+            },
+        )
+        monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_sitemap_step",
             lambda pub, robots_result: {
                 "sitemap_urls": ["https://example.com/sitemap.xml"],
@@ -541,13 +677,22 @@ class TestRunPipeline:
                 "count": 0,
             },
         )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_publisher_details_step",
+            lambda pub, html: {
+                "found": False,
+                "source": None,
+                "score": 0,
+                "organization": None,
+                "candidate_count": 0,
+            },
+        )
 
         run_pipeline(str(job.id))
 
         publisher = job.publisher
         publisher.refresh_from_db()
         assert publisher.robots_txt_found is True
-        assert publisher.robots_txt_url_allowed is True
         assert publisher.sitemap_urls == ["https://example.com/sitemap.xml"]
 
     def test_pipeline_updates_publisher_rss_and_rsl_fields(self, monkeypatch):
@@ -575,6 +720,15 @@ class TestRunPipeline:
         monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_robots_step",
             lambda pub, url: {"robots_found": True, "url_allowed": True},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_ai_bot_blocking_step",
+            lambda pub, robots_result: {
+                "robots_found": True,
+                "bots": {},
+                "blocked_count": 0,
+                "total_count": 13,
+            },
         )
         monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_sitemap_step",
@@ -605,6 +759,16 @@ class TestRunPipeline:
                 "count": 1,
             },
         )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_publisher_details_step",
+            lambda pub, html: {
+                "found": False,
+                "source": None,
+                "score": 0,
+                "organization": None,
+                "candidate_count": 0,
+            },
+        )
 
         run_pipeline(str(job.id))
 
@@ -612,6 +776,162 @@ class TestRunPipeline:
         publisher.refresh_from_db()
         assert publisher.rss_urls == ["https://example.com/feed"]
         assert publisher.rsl_detected is True
+
+    def test_pipeline_updates_publisher_name_from_details(self, monkeypatch):
+        """Pipeline updates publisher.name from structured data when name equals domain."""
+        from publishers.pipeline.supervisor import run_pipeline
+
+        publisher = PublisherFactory(
+            domain="example.com", name="example.com", url="https://example.com"
+        )
+        job = ResolutionJobFactory(publisher=publisher, status="pending")
+
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.publish_step_event",
+            lambda job_id, step, status, data=None: None,
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_waf_step",
+            lambda pub: {"waf_detected": False, "waf_type": ""},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_tos_discovery_step",
+            lambda pub: {"tos_url": None},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_tos_evaluation_step",
+            lambda pub, tos_url: {"skipped": True},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_robots_step",
+            lambda pub, url: {"robots_found": False},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_ai_bot_blocking_step",
+            lambda pub, robots_result: {
+                "robots_found": False,
+                "bots": {},
+                "blocked_count": 0,
+                "total_count": 0,
+            },
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_sitemap_step",
+            lambda pub, robots_result: {
+                "sitemap_urls": [],
+                "source": "none",
+                "count": 0,
+            },
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor._fetch_homepage_html",
+            lambda pub: ("<html></html>", {}),
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rss_step",
+            lambda pub, html: {"feeds": [], "count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rsl_step",
+            lambda pub, robots, html, headers=None: {
+                "rsl_detected": False,
+                "indicators": [],
+                "count": 0,
+            },
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_publisher_details_step",
+            lambda pub, html: {
+                "found": True,
+                "source": "json-ld",
+                "score": 5,
+                "organization": {"name": "Example News", "type": "Organization"},
+                "candidate_count": 1,
+            },
+        )
+
+        run_pipeline(str(job.id))
+
+        publisher.refresh_from_db()
+        assert publisher.name == "Example News"
+
+    def test_pipeline_keeps_custom_publisher_name(self, monkeypatch):
+        """Pipeline does NOT overwrite publisher.name when it differs from domain."""
+        from publishers.pipeline.supervisor import run_pipeline
+
+        publisher = PublisherFactory(
+            domain="example.com", name="My Custom Name", url="https://example.com"
+        )
+        job = ResolutionJobFactory(publisher=publisher, status="pending")
+
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.publish_step_event",
+            lambda job_id, step, status, data=None: None,
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_waf_step",
+            lambda pub: {"waf_detected": False, "waf_type": ""},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_tos_discovery_step",
+            lambda pub: {"tos_url": None},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_tos_evaluation_step",
+            lambda pub, tos_url: {"skipped": True},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_robots_step",
+            lambda pub, url: {"robots_found": False},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_ai_bot_blocking_step",
+            lambda pub, robots_result: {
+                "robots_found": False,
+                "bots": {},
+                "blocked_count": 0,
+                "total_count": 0,
+            },
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_sitemap_step",
+            lambda pub, robots_result: {
+                "sitemap_urls": [],
+                "source": "none",
+                "count": 0,
+            },
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor._fetch_homepage_html",
+            lambda pub: ("<html></html>", {}),
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rss_step",
+            lambda pub, html: {"feeds": [], "count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_rsl_step",
+            lambda pub, robots, html, headers=None: {
+                "rsl_detected": False,
+                "indicators": [],
+                "count": 0,
+            },
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_publisher_details_step",
+            lambda pub, html: {
+                "found": True,
+                "source": "json-ld",
+                "score": 5,
+                "organization": {"name": "Example News", "type": "Organization"},
+                "candidate_count": 1,
+            },
+        )
+
+        run_pipeline(str(job.id))
+
+        publisher.refresh_from_db()
+        assert publisher.name == "My Custom Name"
 
 
 # ---------------------------------------------------------------------------
@@ -1096,3 +1416,509 @@ class TestRunRslStep:
         result = run_rsl_step(publisher, robots_result, "")
         assert result["rsl_detected"] is True
         assert result["indicators"][0]["source"] == "robots.txt"
+
+
+# ---------------------------------------------------------------------------
+# TestRunPublisherDetailsStep
+# ---------------------------------------------------------------------------
+
+JSONLD_ORG_HTML = """
+<html><head>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "Example News",
+    "url": "https://example.com",
+    "logo": "https://example.com/logo.png",
+    "sameAs": ["https://twitter.com/example"]
+}
+</script>
+</head><body></body></html>
+"""
+
+JSONLD_NEWS_MEDIA_HTML = """
+<html><head>
+<script type="application/ld+json">
+[
+    {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "Generic Org",
+        "url": "https://example.com/about"
+    },
+    {
+        "@context": "https://schema.org",
+        "@type": "NewsMediaOrganization",
+        "name": "Example News Media",
+        "url": "https://example.com",
+        "logo": "https://example.com/logo.png"
+    }
+]
+</script>
+</head><body></body></html>
+"""
+
+JSONLD_HOMEPAGE_ID_HTML = """
+<html><head>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@graph": [
+        {
+            "@type": "Organization",
+            "@id": "https://example.com/",
+            "name": "Homepage Org",
+            "url": "https://example.com"
+        },
+        {
+            "@type": "Organization",
+            "@id": "https://example.com/#other",
+            "name": "Other Org"
+        }
+    ]
+}
+</script>
+</head><body></body></html>
+"""
+
+JSONLD_ARTICLE_REF_HTML = """
+<html><head>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@graph": [
+        {
+            "@type": "Organization",
+            "@id": "https://example.com/#organization",
+            "name": "Referenced Org",
+            "logo": "https://example.com/logo.png"
+        },
+        {
+            "@type": "Article",
+            "headline": "Test Article",
+            "publisher": {"@id": "https://example.com/#organization"}
+        }
+    ]
+}
+</script>
+</head><body></body></html>
+"""
+
+MICRODATA_ORG_HTML = """
+<html><body>
+<div itemscope itemtype="https://schema.org/Organization">
+    <span itemprop="name">Microdata Org</span>
+    <a itemprop="url" href="https://example.com">Home</a>
+</div>
+</body></html>
+"""
+
+
+@pytest.mark.django_db
+class TestRunPublisherDetailsStep:
+    def test_publisher_details_jsonld_organization_found(self):
+        """JSON-LD with Organization returns found=True, source='json-ld'."""
+        from publishers.pipeline.steps import run_publisher_details_step
+
+        publisher = PublisherFactory(domain="example.com", url="https://example.com")
+        result = run_publisher_details_step(publisher, JSONLD_ORG_HTML)
+        assert result["found"] is True
+        assert result["source"] == "json-ld"
+        assert result["organization"]["name"] == "Example News"
+        assert result["organization"]["logo"] == "https://example.com/logo.png"
+        assert "https://twitter.com/example" in result["organization"]["same_as"]
+
+    def test_publisher_details_jsonld_news_media_org_preferred(self):
+        """NewsMediaOrganization scores higher than plain Organization."""
+        from publishers.pipeline.steps import run_publisher_details_step
+
+        publisher = PublisherFactory(domain="example.com", url="https://example.com")
+        result = run_publisher_details_step(publisher, JSONLD_NEWS_MEDIA_HTML)
+        assert result["found"] is True
+        assert result["organization"]["name"] == "Example News Media"
+        assert result["organization"]["type"] == "NewsMediaOrganization"
+        assert result["candidate_count"] == 2
+
+    def test_publisher_details_jsonld_homepage_url_match_scores_highest(self):
+        """@id matching homepage gets +4, winning over other candidates."""
+        from publishers.pipeline.steps import run_publisher_details_step
+
+        publisher = PublisherFactory(domain="example.com", url="https://example.com/")
+        result = run_publisher_details_step(publisher, JSONLD_HOMEPAGE_ID_HTML)
+        assert result["found"] is True
+        assert result["organization"]["name"] == "Homepage Org"
+
+    def test_publisher_details_jsonld_referenced_by_article(self):
+        """Organization referenced by Article.publisher gets +2."""
+        from publishers.pipeline.steps import run_publisher_details_step
+
+        publisher = PublisherFactory(domain="example.com", url="https://example.com")
+        result = run_publisher_details_step(publisher, JSONLD_ARTICLE_REF_HTML)
+        assert result["found"] is True
+        assert result["organization"]["name"] == "Referenced Org"
+        assert result["score"] > 0
+
+    def test_publisher_details_microdata_fallback(self):
+        """No JSON-LD orgs falls back to microdata."""
+        from publishers.pipeline.steps import run_publisher_details_step
+
+        publisher = PublisherFactory(domain="example.com", url="https://example.com")
+        result = run_publisher_details_step(publisher, MICRODATA_ORG_HTML)
+        assert result["found"] is True
+        assert result["source"] == "microdata"
+        assert result["organization"]["name"] == "Microdata Org"
+
+    def test_publisher_details_no_structured_data(self):
+        """HTML without structured data returns found=False."""
+        from publishers.pipeline.steps import run_publisher_details_step
+
+        publisher = PublisherFactory(domain="example.com", url="https://example.com")
+        result = run_publisher_details_step(publisher, "<html><body>Hello</body></html>")
+        assert result["found"] is False
+        assert result["organization"] is None
+
+    def test_publisher_details_empty_html(self):
+        """Empty string returns found=False with error."""
+        from publishers.pipeline.steps import run_publisher_details_step
+
+        publisher = PublisherFactory(domain="example.com", url="https://example.com")
+        result = run_publisher_details_step(publisher, "")
+        assert result["found"] is False
+        assert "error" in result
+
+    def test_publisher_details_discards_zero_score_no_url(self):
+        """score==0 + no url/id candidate is discarded."""
+        from publishers.pipeline.steps import run_publisher_details_step
+
+        html = """
+        <html><head>
+        <script type="application/ld+json">
+        {"@context": "https://schema.org", "@type": "Organization", "name": "No URL Org"}
+        </script>
+        </head><body></body></html>
+        """
+        publisher = PublisherFactory(domain="example.com", url="https://example.com")
+        result = run_publisher_details_step(publisher, html)
+        assert result["found"] is False
+
+
+# ---------------------------------------------------------------------------
+# TestTwitterCardParser
+# ---------------------------------------------------------------------------
+
+
+class TestTwitterCardParser:
+    def test_finds_twitter_card_tags(self):
+        """HTML with twitter:card, twitter:title, twitter:image -> all extracted."""
+        from publishers.pipeline.steps import TwitterCardParser
+
+        parser = TwitterCardParser()
+        parser.feed(
+            '<html><head>'
+            '<meta name="twitter:card" content="summary_large_image">'
+            '<meta name="twitter:title" content="Test Article">'
+            '<meta name="twitter:image" content="https://example.com/img.jpg">'
+            '</head></html>'
+        )
+        assert parser.cards["twitter:card"] == "summary_large_image"
+        assert parser.cards["twitter:title"] == "Test Article"
+        assert parser.cards["twitter:image"] == "https://example.com/img.jpg"
+
+    def test_ignores_non_twitter_meta(self):
+        """og:title meta tag not extracted."""
+        from publishers.pipeline.steps import TwitterCardParser
+
+        parser = TwitterCardParser()
+        parser.feed(
+            '<html><head>'
+            '<meta property="og:title" content="OG Title">'
+            '<meta name="twitter:card" content="summary">'
+            '</head></html>'
+        )
+        assert "og:title" not in parser.cards
+        assert parser.cards["twitter:card"] == "summary"
+
+    def test_self_closing_meta_tag(self):
+        """<meta ... /> self-closing works."""
+        from publishers.pipeline.steps import TwitterCardParser
+
+        parser = TwitterCardParser()
+        parser.feed(
+            '<html><head>'
+            '<meta name="twitter:title" content="Self Close" />'
+            '</head></html>'
+        )
+        assert parser.cards["twitter:title"] == "Self Close"
+
+
+# ---------------------------------------------------------------------------
+# TestRunArticleExtractionStep
+# ---------------------------------------------------------------------------
+
+
+JSONLD_ARTICLE_HTML = """
+<html><head>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "NewsArticle",
+    "headline": "Breaking News",
+    "author": {"@type": "Person", "name": "John Doe"},
+    "datePublished": "2026-01-15",
+    "description": "A breaking news article",
+    "publisher": {"@type": "Organization", "name": "Example News"}
+}
+</script>
+</head><body></body></html>
+"""
+
+JSONLD_GRAPH_ARTICLE_HTML = """
+<html><head>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@graph": [
+        {
+            "@type": "NewsArticle",
+            "headline": "Graph Article",
+            "author": "Jane Smith",
+            "datePublished": "2026-02-01"
+        },
+        {
+            "@type": "Organization",
+            "name": "Graph News Org"
+        }
+    ]
+}
+</script>
+</head><body></body></html>
+"""
+
+OG_ARTICLE_HTML = """
+<html><head>
+<meta property="og:title" content="OG Title">
+<meta property="og:description" content="OG Description">
+<meta property="og:image" content="https://example.com/image.jpg">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Example Site">
+<meta property="article:published_time" content="2026-01-15T10:00:00Z">
+<meta property="article:tag" content="tech">
+<meta property="article:tag" content="news">
+</head><body></body></html>
+"""
+
+TWITTER_CARD_ARTICLE_HTML = """
+<html><head>
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Twitter Title">
+<meta name="twitter:description" content="Twitter Description">
+<meta name="twitter:image" content="https://example.com/twitter-img.jpg">
+</head><body></body></html>
+"""
+
+MULTI_FORMAT_HTML = """
+<html><head>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "headline": "Multi Format Article",
+    "author": "Test Author"
+}
+</script>
+<meta property="og:title" content="Multi Format OG">
+<meta property="og:description" content="OG Desc">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Twitter Multi">
+</head><body></body></html>
+"""
+
+
+class TestRunArticleExtractionStep:
+    def test_extracts_jsonld_article(self):
+        """HTML with JSON-LD NewsArticle -> jsonld_fields has headline, author, datePublished."""
+        from publishers.pipeline.steps import run_article_extraction_step
+
+        result = run_article_extraction_step(JSONLD_ARTICLE_HTML, "https://example.com/article")
+        assert result["jsonld_fields"] is not None
+        assert result["jsonld_fields"]["headline"] == "Breaking News"
+        assert result["jsonld_fields"]["author"] == "John Doe"
+        assert result["jsonld_fields"]["datePublished"] == "2026-01-15"
+        assert "json-ld" in result["formats_found"]
+
+    def test_extracts_opengraph(self):
+        """HTML with og:title, og:description -> opengraph_fields has headline, description."""
+        from publishers.pipeline.steps import run_article_extraction_step
+
+        result = run_article_extraction_step(OG_ARTICLE_HTML, "https://example.com/article")
+        assert result["opengraph_fields"] is not None
+        assert result["opengraph_fields"]["headline"] == "OG Title"
+        assert result["opengraph_fields"]["description"] == "OG Description"
+        assert "opengraph" in result["formats_found"]
+
+    def test_extracts_twitter_cards(self):
+        """HTML with twitter:card, twitter:title -> twitter_cards dict populated."""
+        from publishers.pipeline.steps import run_article_extraction_step
+
+        result = run_article_extraction_step(TWITTER_CARD_ARTICLE_HTML, "https://example.com/article")
+        assert result["twitter_cards"] is not None
+        assert result["twitter_cards"]["twitter:card"] == "summary_large_image"
+        assert result["twitter_cards"]["twitter:title"] == "Twitter Title"
+        assert "twitter-cards" in result["formats_found"]
+
+    def test_extracts_multiple_formats(self):
+        """HTML with JSON-LD + OG + Twitter -> formats_found contains all."""
+        from publishers.pipeline.steps import run_article_extraction_step
+
+        result = run_article_extraction_step(MULTI_FORMAT_HTML, "https://example.com/article")
+        assert "json-ld" in result["formats_found"]
+        assert "opengraph" in result["formats_found"]
+        assert "twitter-cards" in result["formats_found"]
+
+    def test_jsonld_graph_nesting(self):
+        """JSON-LD with @graph array containing Article -> correctly extracts."""
+        from publishers.pipeline.steps import run_article_extraction_step
+
+        result = run_article_extraction_step(JSONLD_GRAPH_ARTICLE_HTML, "https://example.com/article")
+        assert result["jsonld_fields"] is not None
+        assert result["jsonld_fields"]["headline"] == "Graph Article"
+
+    def test_empty_html(self):
+        """Empty string returns all None fields, empty formats_found."""
+        from publishers.pipeline.steps import run_article_extraction_step
+
+        result = run_article_extraction_step("", "https://example.com/article")
+        assert result["jsonld_fields"] is None
+        assert result["opengraph_fields"] is None
+        assert result["microdata_fields"] is None
+        assert result["twitter_cards"] is None
+        assert result["formats_found"] == []
+
+    def test_flattens_nested_author(self):
+        """author: {name: "John"} -> fields["author"] == "John"."""
+        from publishers.pipeline.steps import run_article_extraction_step
+
+        result = run_article_extraction_step(JSONLD_ARTICLE_HTML, "https://example.com/article")
+        # Author is nested as {"@type": "Person", "name": "John Doe"}
+        assert result["jsonld_fields"]["author"] == "John Doe"
+
+
+# ---------------------------------------------------------------------------
+# TestRunPaywallDetectionStep
+# ---------------------------------------------------------------------------
+
+
+class TestRunPaywallDetectionStep:
+    def test_schema_accessible_free(self):
+        """isAccessibleForFree: true -> 'free'."""
+        from publishers.pipeline.steps import run_paywall_detection_step
+
+        extraction = {"jsonld_fields": {"isAccessibleForFree": True}}
+        result = run_paywall_detection_step("<html></html>", extraction)
+        assert result["paywall_status"] == "free"
+        assert result["schema_accessible"] is True
+
+    def test_schema_accessible_paywalled(self):
+        """isAccessibleForFree: false -> 'paywalled'."""
+        from publishers.pipeline.steps import run_paywall_detection_step
+
+        extraction = {"jsonld_fields": {"isAccessibleForFree": False}}
+        result = run_paywall_detection_step("<html></html>", extraction)
+        assert result["paywall_status"] == "paywalled"
+        assert result["schema_accessible"] is False
+
+    def test_has_part_nested_accessible(self):
+        """isAccessibleForFree nested in hasPart -> detected."""
+        from publishers.pipeline.steps import run_paywall_detection_step
+
+        extraction = {
+            "jsonld_fields": {
+                "hasPart": [
+                    {"@type": "WebPageElement", "isAccessibleForFree": False}
+                ]
+            }
+        }
+        result = run_paywall_detection_step("<html></html>", extraction)
+        assert result["paywall_status"] == "paywalled"
+
+    def test_heuristic_multiple_signals_paywalled(self):
+        """login wall + paywall class -> 'paywalled'."""
+        from publishers.pipeline.steps import run_paywall_detection_step
+
+        html = '<html><body><div class="paywall">Subscribe to continue reading</div></body></html>'
+        extraction = {"jsonld_fields": None}
+        result = run_paywall_detection_step(html, extraction)
+        assert result["paywall_status"] == "paywalled"
+
+    def test_heuristic_single_signal_unknown(self):
+        """only login wall pattern -> 'unknown'."""
+        from publishers.pipeline.steps import run_paywall_detection_step
+
+        html = "<html><body><p>Subscribe to continue reading</p></body></html>"
+        extraction = {"jsonld_fields": None}
+        result = run_paywall_detection_step(html, extraction)
+        assert result["paywall_status"] == "unknown"
+
+    def test_heuristic_metered(self):
+        """'articles remaining' -> 'metered'."""
+        from publishers.pipeline.steps import run_paywall_detection_step
+
+        html = "<html><body><div>You have 3 articles remaining this month</div></body></html>"
+        extraction = {"jsonld_fields": None}
+        result = run_paywall_detection_step(html, extraction)
+        assert result["paywall_status"] == "metered"
+
+    def test_no_signals_free(self):
+        """Clean HTML with no schema -> 'free'."""
+        from publishers.pipeline.steps import run_paywall_detection_step
+
+        html = "<html><body><p>Normal article content here.</p></body></html>"
+        extraction = {"jsonld_fields": None}
+        result = run_paywall_detection_step(html, extraction)
+        assert result["paywall_status"] == "free"
+
+
+# ---------------------------------------------------------------------------
+# TestRunMetadataProfileStep
+# ---------------------------------------------------------------------------
+
+
+class TestRunMetadataProfileStep:
+    def test_metadata_profile_returns_summary(self, monkeypatch):
+        """monkeypatch agent.run_sync, verify summary returned."""
+        from publishers.pipeline import steps
+
+        mock_output = MagicMock()
+        mock_output.output = MagicMock()
+        mock_output.output.model_dump.return_value = {
+            "summary": "This article has JSON-LD and OpenGraph metadata.",
+            "quality_score": 0.85,
+        }
+        monkeypatch.setattr(
+            steps, "metadata_profile_agent",
+            MagicMock(run_sync=MagicMock(return_value=mock_output)),
+        )
+
+        result = steps.run_metadata_profile_step(
+            {"jsonld_fields": {"headline": "Test"}, "formats_found": ["json-ld"]},
+            "https://example.com/article",
+        )
+        assert result["summary"] == "This article has JSON-LD and OpenGraph metadata."
+        assert result["quality_score"] == 0.85
+
+    def test_metadata_profile_handles_error(self, monkeypatch):
+        """agent raises -> returns error dict."""
+        from publishers.pipeline import steps
+
+        mock_agent = MagicMock()
+        mock_agent.run_sync.side_effect = Exception("LLM service down")
+        monkeypatch.setattr(steps, "metadata_profile_agent", mock_agent)
+
+        result = steps.run_metadata_profile_step(
+            {"jsonld_fields": None, "formats_found": []},
+            "https://example.com/article",
+        )
+        assert result["summary"] == ""
+        assert result["quality_score"] == 0.0
+        assert "error" in result

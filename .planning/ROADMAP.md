@@ -26,7 +26,7 @@
 - [x] **Phase 7: Fetch Strategy** -- curl-cffi with browser TLS fingerprinting and Zyte fallback -- completed 2026-02-14
 - [x] **Phase 8: Core Pipeline & SSE** -- End-to-end URL entry through streaming results with publisher resolution, WAF, and ToS -- completed 2026-02-14
 - [x] **Phase 9: Publisher Discovery** -- robots.txt, sitemap, RSS, and RSL pipeline steps -- completed 2026-02-14
-- [ ] **Phase 10: Article Metadata** -- Structured data extraction, paywall detection, and LLM metadata profiling
+- [x] **Phase 10: Article Metadata** -- Structured data extraction, paywall detection, and LLM metadata profiling -- completed 2026-02-17
 - [ ] **Phase 11: Report Card UI** -- Publisher and article report cards with full end-to-end integration test
 
 ## Phase Details
@@ -104,8 +104,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 10-01-PLAN.md -- ArticleMetadata model and article step functions with TDD
-- [ ] 10-02-PLAN.md -- Supervisor wiring, frontend article steps, and integration tests
+- [x] 10-01-PLAN.md -- ArticleMetadata model and article step functions with TDD
+- [x] 10-02-PLAN.md -- Supervisor wiring, frontend article steps, and integration tests
 
 ### Phase 11: Report Card UI
 **Goal:** User sees a complete, polished report card with publisher-level and article-level findings, and the full pipeline is verified end-to-end
@@ -137,7 +137,7 @@ Plans:
 | 7. Fetch Strategy | v2.0 | 1/1 | Complete | 2026-02-14 |
 | 8. Core Pipeline & SSE | v2.0 | 3/3 | Complete | 2026-02-14 |
 | 9. Publisher Discovery | v2.0 | 2/2 | Complete | 2026-02-14 |
-| 10. Article Metadata | v2.0 | 0/2 | Not started | - |
+| 10. Article Metadata | v2.0 | 2/2 | Complete | 2026-02-17 |
 | 11. Report Card UI | v2.0 | 0/2 | Not started | - |
 
 **v2.0 Overall:** 27/34 requirements complete (79%)

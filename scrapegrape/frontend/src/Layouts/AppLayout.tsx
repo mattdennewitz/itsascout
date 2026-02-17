@@ -1,6 +1,8 @@
 import { Link, usePage } from '@inertiajs/react'
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 interface SharedProps {
     auth: {
@@ -31,20 +33,17 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
     return (
         <div className="min-h-screen">
-            <nav className="bg-white shadow-sm border-b">
+            <nav className="border-b border-gray-300 bg-background">
                 <div className="container mx-auto px-4 py-3 flex items-center justify-between">
-                    <Link href="/" className="text-lg font-bold text-gray-900 hover:text-gray-700">
+                    <Link href="/" className="text-lg font-bold text-foreground hover:text-foreground/80">
                         Scrapegrape
                     </Link>
-                    <div className="flex items-center gap-4">
-                        <Link
-                            href="/"
-                            className="text-sm text-gray-600 hover:text-gray-900"
-                        >
-                            Publishers
-                        </Link>
+                    <div className="flex items-center gap-2">
+                        <Button variant="ghost" size="sm" asChild>
+                            <Link href="/">Publishers</Link>
+                        </Button>
                         {auth?.user && (
-                            <span className="text-sm text-gray-500">
+                            <span className="text-sm text-muted-foreground">
                                 {auth.user.username}
                             </span>
                         )}
@@ -55,17 +54,26 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             {showFlash && (
                 <div className="container mx-auto px-4 pt-4">
                     {flash?.success && (
-                        <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded mb-2">
+                        <div className={cn(
+                            "rounded-md border border-gray-300 px-4 py-3 mb-2 text-sm",
+                            "bg-green-50 text-green-800 dark:bg-green-950 dark:text-green-200"
+                        )}>
                             {flash.success}
                         </div>
                     )}
                     {flash?.error && (
-                        <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded mb-2">
+                        <div className={cn(
+                            "rounded-md border border-gray-300 px-4 py-3 mb-2 text-sm",
+                            "bg-destructive/10 text-destructive"
+                        )}>
                             {flash.error}
                         </div>
                     )}
                     {flash?.info && (
-                        <div className="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded mb-2">
+                        <div className={cn(
+                            "rounded-md border border-gray-300 px-4 py-3 mb-2 text-sm",
+                            "bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-200"
+                        )}>
                             {flash.info}
                         </div>
                     )}

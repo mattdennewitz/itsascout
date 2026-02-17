@@ -2,90 +2,80 @@
 
 import { createColumnHelper, type ColumnDef } from "@tanstack/react-table"
 import { Link } from "@inertiajs/react"
+import { PublisherSheet } from "@/components/PublisherSheet"
 
-type ActivityPermission = {
-  notes: string;
-  activity: string;
-  permission: "explicitly_permitted" | "explicitly_prohibited" | "conditional_ambiguous";
-};
-
-type WAFReport = {
-  firewall: string;
-  manufacturer: string;
-  detected: boolean;
-};
-
-type TermsDiscovery = {
-  terms_of_service_url: string;
-};
-
-type TermsEvaluation = {
-  permissions: ActivityPermission[];
-  territorial_exceptions: string | null;
-  arbitration_clauses: string | null;
-  document_type: string | null;
-};
+export type Permission = {
+  notes: string
+  activity: string
+  permission: "explicitly_permitted" | "explicitly_prohibited" | "conditional_ambiguous"
+}
 
 export type Publisher = {
-  publisher: {
-    id: number;
-    name: string;
-    url: string;
-    detected_waf: string;
-  };
-  waf_report: WAFReport;
-  terms_discovery: TermsDiscovery;
-  terms_evaluation: TermsEvaluation;
+  id: number
+  name: string
+  domain: string
+  url: string
+  waf_detected: boolean
+  waf_type: string
+  tos_url: string
+  tos_permissions: Permission[] | null
+  robots_txt_found: boolean | null
+  robots_txt_url_allowed: boolean | null
+  sitemap_urls: string[]
+  rss_urls: string[]
+  rsl_detected: boolean | null
+  fetch_strategy: string
+  last_checked_at: string | null
 }
 
 const columnHelper = createColumnHelper<Publisher>()
 
+function tosLabel(permissions: Permission[] | null) {
+  if (!permissions || permissions.length === 0) {
+    return "Unknown"
+  }
+  const prohibited = permissions.filter(p => p.permission === "explicitly_prohibited").length
+  const permitted = permissions.filter(p => p.permission === "explicitly_permitted").length
+  if (prohibited > 0) {
+    return `${prohibited} prohibited`
+  }
+  if (permitted === permissions.length) {
+    return `${permitted} permitted`
+  }
+  return `${permitted} ok / ${permissions.length - permitted} other`
+}
+
 export const columns: ColumnDef<Publisher, any>[] = [
-  columnHelper.display({
-    id: "expander",
-    header: "",
-    cell: ({ row }) => {
-      const permissions = (row.original as any).terms_evaluation?.permissions;
-      const hasPermissions = permissions && permissions.length > 0;
-      
-      if (!hasPermissions) {
-        return null;
-      }
-      
-      return (
-        <button
-          onClick={() => row.toggleExpanded()}
-          className="p-1 hover:bg-gray-100 rounded"
-        >
-          {row.getIsExpanded() ? "−" : "+"}
-        </button>
-      )
+  columnHelper.accessor("name", {
+    header: "Publisher",
+    cell: props => (
+      <Link
+        href={`/publishers/${props.row.original.id}`}
+        className="font-medium text-primary underline-offset-4 hover:underline"
+      >
+        {props.getValue()}
+      </Link>
+    ),
+  }),
+  columnHelper.accessor("domain", {
+    header: "Domain",
+  }),
+  columnHelper.accessor("waf_detected", {
+    header: "WAF",
+    cell: props => {
+      const detected = props.getValue()
+      const type = props.row.original.waf_type
+      return detected ? (type || "Detected") : "None"
     },
   }),
-  columnHelper.accessor("publisher.name", {
-    header: "Publisher",
-    cell: props => {
-      const value = props.cell.getValue();
-      return <span><a target={"_blank"} href={props.row.original.publisher.url}>{value}</a></span>
-    }
-  }),
-  columnHelper.accessor("publisher.detected_waf", {
-    header: "WAF",
-  }),
-  columnHelper.accessor("terms_discovery.terms_of_service_url", {
-    header: "Terms URL",
-    cell: props => <a href={props.getValue()}>View Terms</a>
+  columnHelper.display({
+    id: "tos",
+    header: "ToS",
+    cell: ({ row }) => tosLabel(row.original.tos_permissions),
   }),
   columnHelper.display({
     id: "actions",
     header: "",
-    cell: ({ row }) => (
-      <Link
-        href={`/publishers/${row.original.publisher.id}/edit`}
-        className="text-blue-600 hover:underline"
-      >
-        Edit
-      </Link>
-    ),
+    cell: ({ row }) => <PublisherSheet publisher={row.original} />,
   }),
 ]

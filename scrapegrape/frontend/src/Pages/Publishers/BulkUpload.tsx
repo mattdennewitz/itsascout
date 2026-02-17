@@ -33,7 +33,7 @@ function BulkUpload() {
                         type="file"
                         accept=".csv"
                         onChange={handleFileChange}
-                        className="w-full px-4 py-2 border rounded"
+                        className="w-full px-4 py-2 border border-gray-300 rounded"
                         disabled={processing}
                     />
                 </FormField>

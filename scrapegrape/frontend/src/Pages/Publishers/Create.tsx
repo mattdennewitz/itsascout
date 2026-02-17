@@ -27,7 +27,7 @@ function Create() {
                         type="text"
                         value={data.name}
                         onChange={e => setData('name', e.target.value)}
-                        className={`w-full px-4 py-2 border rounded ${errors.name ? 'border-red-500' : ''}`}
+                        className={`w-full px-4 py-2 border border-gray-300 rounded ${errors.name ? 'border-red-500' : ''}`}
                         disabled={processing}
                     />
                 </FormField>
@@ -38,7 +38,7 @@ function Create() {
                         value={data.url}
                         onChange={e => setData('url', e.target.value)}
                         placeholder="https://example.com"
-                        className={`w-full px-4 py-2 border rounded ${errors.url ? 'border-red-500' : ''}`}
+                        className={`w-full px-4 py-2 border border-gray-300 rounded ${errors.url ? 'border-red-500' : ''}`}
                         disabled={processing}
                     />
                 </FormField>

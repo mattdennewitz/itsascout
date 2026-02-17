@@ -107,7 +107,7 @@ function stepDataSummary(step: string, data: Record<string, unknown>): string | 
 }
 
 function StepCard({ step, event }: { step: typeof PIPELINE_STEPS[number]; event: PipelineEvent | undefined }) {
-    let borderClass = 'border-gray-200'
+    let borderClass = 'border-gray-300'
     let bgClass = 'bg-white'
     let textClass = 'text-gray-400'
     let statusLabel = 'Pending'
@@ -116,20 +116,20 @@ function StepCard({ step, event }: { step: typeof PIPELINE_STEPS[number]; event:
     if (event) {
         switch (event.status) {
             case 'completed':
-                borderClass = 'border-green-300'
+                borderClass = 'border-gray-300'
                 bgClass = 'bg-green-50'
                 textClass = 'text-green-800'
                 statusLabel = 'Completed'
                 break
             case 'started':
-                borderClass = 'border-blue-300'
+                borderClass = 'border-gray-300'
                 bgClass = 'bg-blue-50'
                 textClass = 'text-blue-800'
                 statusLabel = 'Running'
                 animate = 'animate-pulse'
                 break
             case 'failed':
-                borderClass = 'border-red-300'
+                borderClass = 'border-gray-300'
                 bgClass = 'bg-red-50'
                 textClass = 'text-red-800'
                 statusLabel = 'Failed'

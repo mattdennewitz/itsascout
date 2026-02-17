@@ -9,19 +9,19 @@ See: .planning/PROJECT.md (updated 2026-02-13)
 
 ## Current Position
 
-Phase: 10 of 11 (Article Metadata)
-Plan: 1 of 2 in current phase
-Status: Plan 10-01 complete
-Last activity: 2026-02-17 -- Plan 10-01 complete. ArticleMetadata model, three article step functions (extraction, paywall, profile), 19 tests.
+Phase: 10 of 11 (Article Metadata) -- COMPLETE
+Plan: 2 of 2 in current phase
+Status: Phase 10 complete
+Last activity: 2026-02-17 -- Plan 10-02 complete. 12-step pipeline with article extraction, paywall detection, metadata profile. Frontend article analysis section.
 
-Progress: [████████░░] 75%
+Progress: [█████████░] 85%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 9 (v2.0)
-- Average duration: 3min
-- Total execution time: 0.49 hours
+- Total plans completed: 10 (v2.0)
+- Average duration: 3.3min
+- Total execution time: 0.55 hours
 
 **By Phase:**
 
@@ -31,10 +31,10 @@ Progress: [████████░░] 75%
 | 07-fetch-strategy | 1 | 3min | 3min |
 | 08-core-pipeline-sse | 3 | 7min | 2.3min |
 | 09-publisher-discovery | 2 | 7min | 3.5min |
-| 10-article-metadata | 1 | 4min | 4min |
+| 10-article-metadata | 2 | 9min | 4.5min |
 
 **Recent Trend:**
-- Last 5 plans: 08-02 (2min), 08-03 (2min), 09-01 (3min), 09-02 (4min), 10-01 (4min)
+- Last 5 plans: 08-03 (2min), 09-01 (3min), 09-02 (4min), 10-01 (4min), 10-02 (5min)
 - Trend: stable
 
 *Updated after each plan completion*
@@ -82,6 +82,8 @@ Recent decisions affecting current work:
 - [10-01]: hasPart nesting check for isAccessibleForFree (Google's recommended pattern)
 - [10-01]: High confidence bar: single heuristic signal alone -> unknown, not paywalled
 - [10-01]: extruct uniform=False to preserve native OpenGraph list-of-tuples format
+- [10-02]: Article steps run outside publisher freshness branch with own ARTICLE_FRESHNESS_TTL
+- [10-02]: homepage_html initialized before branch to prevent NameError when publisher steps skipped
 
 ### Pending Todos
 
@@ -98,5 +100,5 @@ None currently.
 ## Session Continuity
 
 Last session: 2026-02-17
-Stopped at: Completed 10-01-PLAN.md (ArticleMetadata model, 3 article step functions, 19 tests). Ready for Plan 10-02.
+Stopped at: Completed 10-02-PLAN.md. Phase 10 complete. 12-step pipeline with frontend. Ready for Phase 11.
 Resume file: None

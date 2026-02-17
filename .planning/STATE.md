@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-13)
 
 **Core value:** Paste a URL, get a comprehensive scraping report card with real-time progress as each check completes.
-**Current focus:** Phase 9 complete (publisher discovery). Ready for Phase 10.
+**Current focus:** Phase 10 in progress (article metadata extraction).
 
 ## Current Position
 
-Phase: 9 of 11 (Publisher Discovery)
-Plan: 2 of 2 in current phase
-Status: Phase 09 complete
-Last activity: 2026-02-14 -- Plan 09-02 complete. RSS feed discovery, RSL detection, 8-step pipeline with full frontend display.
+Phase: 10 of 11 (Article Metadata)
+Plan: 1 of 2 in current phase
+Status: Plan 10-01 complete
+Last activity: 2026-02-17 -- Plan 10-01 complete. ArticleMetadata model, three article step functions (extraction, paywall, profile), 19 tests.
 
-Progress: [████████░░] 70%
+Progress: [████████░░] 75%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8 (v2.0)
+- Total plans completed: 9 (v2.0)
 - Average duration: 3min
-- Total execution time: 0.42 hours
+- Total execution time: 0.49 hours
 
 **By Phase:**
 
@@ -31,9 +31,10 @@ Progress: [████████░░] 70%
 | 07-fetch-strategy | 1 | 3min | 3min |
 | 08-core-pipeline-sse | 3 | 7min | 2.3min |
 | 09-publisher-discovery | 2 | 7min | 3.5min |
+| 10-article-metadata | 1 | 4min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 08-01 (3min), 08-02 (2min), 08-03 (2min), 09-01 (3min), 09-02 (4min)
+- Last 5 plans: 08-02 (2min), 08-03 (2min), 09-01 (3min), 09-02 (4min), 10-01 (4min)
 - Trend: stable
 
 *Updated after each plan completion*
@@ -77,6 +78,10 @@ Recent decisions affecting current work:
 - [09-02]: stdlib html.parser.HTMLParser for feed/RSL link extraction (no external dependency)
 - [09-02]: Homepage HTML fetched once and shared between RSS and RSL steps
 - [09-02]: RSL detection best-effort across three sources (robots.txt, HTML link, HTTP Link header)
+- [10-01]: GPT-4.1-nano for metadata profile agent (cheaper than gpt-5-mini, sufficient for profiling)
+- [10-01]: hasPart nesting check for isAccessibleForFree (Google's recommended pattern)
+- [10-01]: High confidence bar: single heuristic signal alone -> unknown, not paywalled
+- [10-01]: extruct uniform=False to preserve native OpenGraph list-of-tuples format
 
 ### Pending Todos
 
@@ -92,6 +97,6 @@ None currently.
 
 ## Session Continuity
 
-Last session: 2026-02-14
-Stopped at: Completed 09-02-PLAN.md (RSS/RSL steps, 8-step pipeline, full frontend). Phase 09 complete. Ready for Phase 10.
+Last session: 2026-02-17
+Stopped at: Completed 10-01-PLAN.md (ArticleMetadata model, 3 article step functions, 19 tests). Ready for Plan 10-02.
 Resume file: None

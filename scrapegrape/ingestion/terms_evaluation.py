@@ -121,7 +121,7 @@ terms_evaluation_agent = Agent(
 )
 
 
-def evaluate_terms_and_conditions(url: str) -> TermsEvaluationResult:
+def evaluate_terms_and_conditions(url: str, publisher=None) -> TermsEvaluationResult:
     """
     Evaluate Terms of Service and Privacy Policy content for activity permissions.
 
@@ -145,7 +145,7 @@ def evaluate_terms_and_conditions(url: str) -> TermsEvaluationResult:
 
     try:
         # Fetch HTML content
-        html_content = fetch_html_via_proxy(url)
+        html_content = fetch_html_via_proxy(url, publisher=publisher)
         logger.debug(
             f"Successfully fetched HTML content ({len(html_content)} characters)"
         )

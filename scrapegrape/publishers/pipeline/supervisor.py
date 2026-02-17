@@ -4,6 +4,8 @@ from django.utils import timezone
 from django_rq import job
 from loguru import logger
 
+from publishers.fetchers.exceptions import AllStrategiesExhausted
+from publishers.fetchers.manager import FetchStrategyManager
 from publishers.models import ResolutionJob
 from publishers.pipeline.events import publish_step_event
 from publishers.pipeline.steps import (
@@ -18,20 +20,17 @@ from publishers.pipeline.steps import (
 )
 
 
+_fetch_manager = FetchStrategyManager()
+
+
 def _fetch_homepage_html(publisher):
     """Fetch publisher homepage HTML. Returns (html, headers) tuple."""
-    import requests as _requests
-
     try:
-        resp = _requests.get(
-            f"https://{publisher.domain}/",
-            timeout=15,
-            headers={"User-Agent": "itsascout"},
+        result = _fetch_manager.fetch(
+            f"https://{publisher.domain}/", publisher=publisher
         )
-        if resp.status_code == 200:
-            return resp.text, dict(resp.headers)
-        return "", {}
-    except Exception as exc:
+        return result.html, {}
+    except AllStrategiesExhausted as exc:
         logger.warning(f"Could not fetch homepage for {publisher.domain}: {exc}")
         return "", {}
 

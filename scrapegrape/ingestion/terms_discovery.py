@@ -74,7 +74,7 @@ terms_discovery_agent = Agent(
 )
 
 
-def discover_terms_and_privacy(url: str) -> TermsDiscoveryResult:
+def discover_terms_and_privacy(url: str, publisher=None) -> TermsDiscoveryResult:
     """
     Discover Terms of Service and Privacy Policy URLs from a website.
 
@@ -99,7 +99,7 @@ def discover_terms_and_privacy(url: str) -> TermsDiscoveryResult:
 
     try:
         # Fetch HTML content
-        html_content = fetch_html_via_proxy(url)
+        html_content = fetch_html_via_proxy(url, publisher=publisher)
         logger.debug(
             f"Successfully fetched HTML content ({len(html_content)} characters)"
         )

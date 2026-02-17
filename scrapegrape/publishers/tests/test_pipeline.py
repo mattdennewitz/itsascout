@@ -6,9 +6,10 @@ from unittest.mock import MagicMock
 
 import pytest
 from django.utils import timezone
-from requests.exceptions import ConnectionError as RequestsConnectionError
 
 from publishers.factories import PublisherFactory, ResolutionJobFactory
+from publishers.fetchers.base import FetchResult
+from publishers.fetchers.exceptions import AllStrategiesExhausted
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +157,7 @@ class TestRunTosDiscoveryStep:
 
         monkeypatch.setattr(
             "publishers.pipeline.steps.discover_terms_and_privacy",
-            lambda url: mock_result,
+            lambda url, publisher=None: mock_result,
         )
         publisher = PublisherFactory()
         result = run_tos_discovery_step(publisher)
@@ -174,7 +175,7 @@ class TestRunTosDiscoveryStep:
 
         monkeypatch.setattr(
             "publishers.pipeline.steps.discover_terms_and_privacy",
-            lambda url: mock_result,
+            lambda url, publisher=None: mock_result,
         )
         publisher = PublisherFactory()
         result = run_tos_discovery_step(publisher)
@@ -213,7 +214,7 @@ class TestRunTosEvaluationStep:
 
         monkeypatch.setattr(
             "publishers.pipeline.steps.evaluate_terms_and_conditions",
-            lambda url: mock_result,
+            lambda url, publisher=None: mock_result,
         )
         publisher = PublisherFactory()
         result = run_tos_evaluation_step(publisher, tos_url="https://example.com/tos")
@@ -664,19 +665,22 @@ class TestExtractLicenseDirectives:
 
 @pytest.mark.django_db
 class TestRunRobotsStep:
+    def _patch_fetch(self, monkeypatch, text):
+        """Helper: patch _fetch_manager.fetch to return a FetchResult with given text."""
+        mock_manager = MagicMock()
+        mock_manager.fetch.return_value = FetchResult(
+            html=text, status_code=200, strategy_used="curl_cffi", url=""
+        )
+        monkeypatch.setattr("publishers.pipeline.steps._fetch_manager", mock_manager)
+        return mock_manager
+
     def test_robots_found_url_allowed(self, monkeypatch):
         """robots step parses robots.txt and reports url_allowed=True."""
         from publishers.pipeline.steps import run_robots_step
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.headers = {"Content-Type": "text/plain"}
-        mock_response.text = (
-            "User-agent: *\nAllow: /\n"
-            "Sitemap: https://example.com/sitemap.xml"
-        )
-        monkeypatch.setattr(
-            "publishers.pipeline.steps.requests.get", lambda *a, **kw: mock_response
+        self._patch_fetch(
+            monkeypatch,
+            "User-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml",
         )
 
         publisher = PublisherFactory(domain="example.com")
@@ -689,44 +693,32 @@ class TestRunRobotsStep:
         """robots step reports url_allowed=False for disallowed path."""
         from publishers.pipeline.steps import run_robots_step
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.headers = {"Content-Type": "text/plain"}
-        mock_response.text = "User-agent: *\nDisallow: /private/"
-        monkeypatch.setattr(
-            "publishers.pipeline.steps.requests.get", lambda *a, **kw: mock_response
-        )
+        self._patch_fetch(monkeypatch, "User-agent: *\nDisallow: /private/")
 
         publisher = PublisherFactory(domain="example.com")
         result = run_robots_step(publisher, "https://example.com/private/secret")
         assert result["robots_found"] is True
         assert result["url_allowed"] is False
 
-    def test_robots_not_found_404(self, monkeypatch):
-        """robots step returns robots_found=False on 404."""
+    def test_robots_not_found(self, monkeypatch):
+        """robots step returns robots_found=False when fetch fails."""
         from publishers.pipeline.steps import run_robots_step
 
-        mock_response = MagicMock()
-        mock_response.status_code = 404
-        monkeypatch.setattr(
-            "publishers.pipeline.steps.requests.get", lambda *a, **kw: mock_response
-        )
+        mock_manager = MagicMock()
+        mock_manager.fetch.side_effect = AllStrategiesExhausted("all failed")
+        monkeypatch.setattr("publishers.pipeline.steps._fetch_manager", mock_manager)
 
         publisher = PublisherFactory(domain="example.com")
         result = run_robots_step(publisher, "https://example.com/article")
         assert result["robots_found"] is False
-        assert result["status_code"] == 404
+        assert "error" in result
 
     def test_robots_html_challenge_page(self, monkeypatch):
-        """robots step treats 200 with text/html as WAF challenge (not found)."""
+        """robots step treats HTML response as WAF challenge (not found)."""
         from publishers.pipeline.steps import run_robots_step
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.headers = {"Content-Type": "text/html; charset=utf-8"}
-        mock_response.text = "<html><body>Challenge</body></html>"
-        monkeypatch.setattr(
-            "publishers.pipeline.steps.requests.get", lambda *a, **kw: mock_response
+        self._patch_fetch(
+            monkeypatch, "<html><body>Challenge</body></html>"
         )
 
         publisher = PublisherFactory(domain="example.com")
@@ -737,12 +729,9 @@ class TestRunRobotsStep:
         """robots step returns robots_found=False with error on network failure."""
         from publishers.pipeline.steps import run_robots_step
 
-        def raise_error(*a, **kw):
-            raise RequestsConnectionError("connection refused")
-
-        monkeypatch.setattr(
-            "publishers.pipeline.steps.requests.get", raise_error
-        )
+        mock_manager = MagicMock()
+        mock_manager.fetch.side_effect = AllStrategiesExhausted("connection refused")
+        monkeypatch.setattr("publishers.pipeline.steps._fetch_manager", mock_manager)
 
         publisher = PublisherFactory(domain="example.com")
         result = run_robots_step(publisher, "https://example.com/article")
@@ -753,15 +742,7 @@ class TestRunRobotsStep:
         """robots step returns robots_found=False on malformed/binary content."""
         from publishers.pipeline.steps import run_robots_step
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.headers = {"Content-Type": "text/plain"}
-        mock_response.text = "\x00\x01\x02binary garbage"
-
-        # Make Protego.parse raise
-        monkeypatch.setattr(
-            "publishers.pipeline.steps.requests.get", lambda *a, **kw: mock_response
-        )
+        self._patch_fetch(monkeypatch, "\x00\x01\x02binary garbage")
         monkeypatch.setattr(
             "publishers.pipeline.steps.Protego.parse",
             lambda text: (_ for _ in ()).throw(Exception("parse error")),
@@ -776,15 +757,9 @@ class TestRunRobotsStep:
         """robots step extracts License: directives from robots.txt."""
         from publishers.pipeline.steps import run_robots_step
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.headers = {"Content-Type": "text/plain"}
-        mock_response.text = (
-            "User-agent: *\nAllow: /\n"
-            "License: https://example.com/license.xml"
-        )
-        monkeypatch.setattr(
-            "publishers.pipeline.steps.requests.get", lambda *a, **kw: mock_response
+        self._patch_fetch(
+            monkeypatch,
+            "User-agent: *\nAllow: /\nLicense: https://example.com/license.xml",
         )
 
         publisher = PublisherFactory(domain="example.com")
@@ -795,12 +770,8 @@ class TestRunRobotsStep:
         """robots step extracts Crawl-delay value."""
         from publishers.pipeline.steps import run_robots_step
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.headers = {"Content-Type": "text/plain"}
-        mock_response.text = "User-agent: itsascout\nCrawl-delay: 5\nAllow: /"
-        monkeypatch.setattr(
-            "publishers.pipeline.steps.requests.get", lambda *a, **kw: mock_response
+        self._patch_fetch(
+            monkeypatch, "User-agent: itsascout\nCrawl-delay: 5\nAllow: /"
         )
 
         publisher = PublisherFactory(domain="example.com")
@@ -832,12 +803,14 @@ class TestRunSitemapStep:
         """sitemap step probes common paths when robots has no sitemaps."""
         from publishers.pipeline.steps import run_sitemap_step
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "application/xml"}
-        monkeypatch.setattr(
-            "publishers.pipeline.steps.requests.head", lambda *a, **kw: mock_response
+        mock_manager = MagicMock()
+        mock_manager.fetch.return_value = FetchResult(
+            html='<?xml version="1.0"?><urlset></urlset>',
+            status_code=200,
+            strategy_used="curl_cffi",
+            url="",
         )
+        monkeypatch.setattr("publishers.pipeline.steps._fetch_manager", mock_manager)
 
         publisher = PublisherFactory(domain="example.com")
         robots_result = {"sitemaps_from_robots": []}
@@ -849,12 +822,9 @@ class TestRunSitemapStep:
         """sitemap step returns count=0, source='none' when nothing found."""
         from publishers.pipeline.steps import run_sitemap_step
 
-        mock_response = MagicMock()
-        mock_response.status_code = 404
-        mock_response.headers = {"content-type": "text/html"}
-        monkeypatch.setattr(
-            "publishers.pipeline.steps.requests.head", lambda *a, **kw: mock_response
-        )
+        mock_manager = MagicMock()
+        mock_manager.fetch.side_effect = AllStrategiesExhausted("not found")
+        monkeypatch.setattr("publishers.pipeline.steps._fetch_manager", mock_manager)
 
         publisher = PublisherFactory(domain="example.com")
         robots_result = {}
@@ -868,16 +838,18 @@ class TestRunSitemapStep:
 
         call_count = []
 
-        def mock_head(*a, **kw):
+        def mock_fetch(url, publisher=None):
             call_count.append(1)
-            resp = MagicMock()
-            resp.status_code = 200
-            resp.headers = {"content-type": "application/xml"}
-            return resp
+            return FetchResult(
+                html='<?xml version="1.0"?><urlset></urlset>',
+                status_code=200,
+                strategy_used="curl_cffi",
+                url=url,
+            )
 
-        monkeypatch.setattr(
-            "publishers.pipeline.steps.requests.head", mock_head
-        )
+        mock_manager = MagicMock()
+        mock_manager.fetch.side_effect = mock_fetch
+        monkeypatch.setattr("publishers.pipeline.steps._fetch_manager", mock_manager)
 
         publisher = PublisherFactory(domain="example.com")
         robots_result = {"sitemaps_from_robots": []}
@@ -896,6 +868,25 @@ class TestRunSitemapStep:
         result = run_sitemap_step(publisher, robots_result)
         assert "https://example.com/sitemap.xml" in result["sitemap_urls"]
         assert result["source"] == "robots.txt"
+
+    def test_non_xml_content_skipped(self, monkeypatch):
+        """sitemap step skips non-XML responses during probing."""
+        from publishers.pipeline.steps import run_sitemap_step
+
+        mock_manager = MagicMock()
+        mock_manager.fetch.return_value = FetchResult(
+            html="<html><body>Not a sitemap</body></html>",
+            status_code=200,
+            strategy_used="curl_cffi",
+            url="",
+        )
+        monkeypatch.setattr("publishers.pipeline.steps._fetch_manager", mock_manager)
+
+        publisher = PublisherFactory(domain="example.com")
+        robots_result = {"sitemaps_from_robots": []}
+        result = run_sitemap_step(publisher, robots_result)
+        assert result["count"] == 0
+        assert result["source"] == "none"
 
 
 # ---------------------------------------------------------------------------
@@ -1081,6 +1072,20 @@ class TestRunRslStep:
         result = run_rsl_step(publisher, {}, "<html></html>")
         assert result["rsl_detected"] is False
         assert result["count"] == 0
+
+    def test_rsl_resolves_relative_urls(self):
+        """run_rsl_step resolves relative URLs to absolute."""
+        from publishers.pipeline.steps import run_rsl_step
+
+        publisher = PublisherFactory(domain="example.com")
+        robots_result = {"license_directives": ["/rsl/license.xml"]}
+        html = '<html><head><link rel="license" type="application/rsl+xml" href="/license.xml"></head></html>'
+        headers = {"Link": '</header-license.xml>; rel="license"; type="application/rsl+xml"'}
+        result = run_rsl_step(publisher, robots_result, html, headers)
+        urls = [i["url"] for i in result["indicators"]]
+        assert urls[0] == "https://example.com/rsl/license.xml"
+        assert urls[1] == "https://example.com/license.xml"
+        assert urls[2] == "https://example.com/header-license.xml"
 
     def test_rsl_empty_html_with_robots_license(self):
         """run_rsl_step detects RSL from robots.txt even with empty HTML."""

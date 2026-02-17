@@ -12,12 +12,13 @@ from html.parser import HTMLParser
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin
 
-import requests
 from django.conf import settings
 from django.utils import timezone
 from loguru import logger
 from protego import Protego
 
+from publishers.fetchers.exceptions import AllStrategiesExhausted
+from publishers.fetchers.manager import FetchStrategyManager
 from publishers.waf_check import scan_url_with_wafw00f
 from ingestion.terms_discovery import discover_terms_and_privacy
 from ingestion.terms_evaluation import evaluate_terms_and_conditions
@@ -26,6 +27,8 @@ if TYPE_CHECKING:
     from publishers.models import Publisher
 
 ITSASCOUT_USER_AGENT = "itsascout"
+
+_fetch_manager = FetchStrategyManager()
 
 COMMON_SITEMAP_PATHS = [
     "/sitemap.xml",
@@ -55,8 +58,9 @@ def should_skip_publisher_steps(publisher: Publisher) -> bool:
 
 def run_waf_step(publisher: Publisher) -> dict:
     """Run wafw00f against the publisher URL and return structured result."""
+    publisher_url = publisher.url or f"https://{publisher.domain}/"
     try:
-        result = scan_url_with_wafw00f(publisher.url)
+        result = scan_url_with_wafw00f(publisher_url)
         if result is None:
             return {"waf_detected": False, "waf_type": "", "error": "WAF scan failed"}
 
@@ -66,7 +70,7 @@ def run_waf_step(publisher: Publisher) -> dict:
             "waf_type": report.get("firewall", "") if report.get("detected") else "",
         }
     except Exception as exc:
-        logger.error(f"WAF step error for {publisher.url}: {exc}")
+        logger.error(f"WAF step error for {publisher_url}: {exc}")
         return {"waf_detected": False, "waf_type": "", "error": str(exc)}
 
 
@@ -77,8 +81,9 @@ def run_waf_step(publisher: Publisher) -> dict:
 
 def run_tos_discovery_step(publisher: Publisher) -> dict:
     """Discover Terms of Service URL for the publisher."""
+    publisher_url = publisher.url or f"https://{publisher.domain}/"
     try:
-        discovery = discover_terms_and_privacy(publisher.url)
+        discovery = discover_terms_and_privacy(publisher_url, publisher=publisher)
         tos_url = (
             str(discovery.terms_of_service_url)
             if discovery.terms_of_service_url
@@ -90,7 +95,7 @@ def run_tos_discovery_step(publisher: Publisher) -> dict:
             "notes": discovery.notes or "",
         }
     except Exception as exc:
-        logger.error(f"ToS discovery error for {publisher.url}: {exc}")
+        logger.error(f"ToS discovery error for {publisher_url}: {exc}")
         return {"tos_url": None, "error": str(exc)}
 
 
@@ -105,7 +110,7 @@ def run_tos_evaluation_step(publisher: Publisher, tos_url: str | None) -> dict:
         return {"skipped": True, "reason": "No ToS URL found"}
 
     try:
-        evaluation = evaluate_terms_and_conditions(tos_url)
+        evaluation = evaluate_terms_and_conditions(tos_url, publisher=publisher)
         return {
             "permissions": [p.model_dump() for p in evaluation.permissions],
             "document_type": evaluation.document_type,
@@ -137,26 +142,23 @@ def run_robots_step(publisher: Publisher, submitted_url: str) -> dict:
     """Fetch and parse robots.txt, check if submitted URL is allowed."""
     robots_url = urljoin(f"https://{publisher.domain}/", "/robots.txt")
     try:
-        response = requests.get(
-            robots_url, timeout=15, headers={"User-Agent": ITSASCOUT_USER_AGENT}
-        )
-        if response.status_code != 200:
-            return {"robots_found": False, "status_code": response.status_code}
+        result = _fetch_manager.fetch(robots_url, publisher=publisher)
+        text = result.html
 
-        # Content-type guard: HTML response means WAF challenge, not real robots.txt
-        content_type = response.headers.get("Content-Type", "")
-        if "text/html" in content_type:
+        # Content guard: HTML response means WAF challenge, not real robots.txt
+        lower = text.strip().lower()
+        if lower.startswith("<html") or lower.startswith("<!doctype"):
             return {"robots_found": False, "error": "HTML response (likely WAF challenge)"}
 
         try:
-            rp = Protego.parse(response.text)
+            rp = Protego.parse(text)
         except Exception:
             return {"robots_found": False, "error": "malformed robots.txt"}
 
         url_allowed = rp.can_fetch(submitted_url, ITSASCOUT_USER_AGENT)
         sitemaps = list(rp.sitemaps)
         crawl_delay = rp.crawl_delay(ITSASCOUT_USER_AGENT)
-        license_directives = _extract_license_directives(response.text)
+        license_directives = _extract_license_directives(text)
 
         return {
             "robots_found": True,
@@ -164,9 +166,9 @@ def run_robots_step(publisher: Publisher, submitted_url: str) -> dict:
             "sitemaps_from_robots": sitemaps,
             "crawl_delay": crawl_delay,
             "license_directives": license_directives,
-            "raw_length": len(response.text),
+            "raw_length": len(text),
         }
-    except requests.RequestException as exc:
+    except AllStrategiesExhausted as exc:
         logger.error(f"robots.txt fetch error for {publisher.domain}: {exc}")
         return {"robots_found": False, "error": str(exc)}
 
@@ -192,41 +194,14 @@ def run_sitemap_step(publisher: Publisher, robots_result: dict) -> dict:
         for path in COMMON_SITEMAP_PATHS:
             sitemap_url = urljoin(base_url, path)
             try:
-                resp = requests.head(sitemap_url, timeout=10, allow_redirects=True)
-                if resp.status_code == 200 and "xml" in resp.headers.get(
-                    "content-type", ""
-                ):
+                result = _fetch_manager.fetch(sitemap_url, publisher=publisher)
+                text = result.html.strip()
+                # Verify content looks like XML sitemap
+                if text.startswith("<?xml") or "<urlset" in text or "<sitemapindex" in text:
                     found_sitemaps.add(sitemap_url)
                     source = "probe"
                     break
-                # Fall back to GET if HEAD returns 405
-                if resp.status_code == 405:
-                    resp = requests.get(
-                        sitemap_url, timeout=10, stream=True
-                    )
-                    resp.close()
-                    if resp.status_code == 200 and "xml" in resp.headers.get(
-                        "content-type", ""
-                    ):
-                        found_sitemaps.add(sitemap_url)
-                        source = "probe"
-                        break
-            except requests.ConnectionError:
-                # Fall back to GET on connection error from HEAD
-                try:
-                    resp = requests.get(
-                        sitemap_url, timeout=10, stream=True
-                    )
-                    resp.close()
-                    if resp.status_code == 200 and "xml" in resp.headers.get(
-                        "content-type", ""
-                    ):
-                        found_sitemaps.add(sitemap_url)
-                        source = "probe"
-                        break
-                except requests.RequestException:
-                    continue
-            except requests.RequestException:
+            except AllStrategiesExhausted:
                 continue
 
     return {
@@ -335,11 +310,12 @@ def run_rsl_step(
     homepage_headers: dict | None = None,
 ) -> dict:
     """Detect RSL licensing indicators from robots.txt, HTML, and HTTP headers."""
+    base_url = f"https://{publisher.domain}/"
     indicators: list[dict] = []
 
     # Source 1: License directives from robots.txt
     for url in robots_result.get("license_directives", []):
-        indicators.append({"source": "robots.txt", "url": url})
+        indicators.append({"source": "robots.txt", "url": urljoin(base_url, url)})
 
     # Source 2: <link rel="license" type="application/rsl+xml"> in HTML
     if homepage_html:
@@ -349,7 +325,7 @@ def run_rsl_step(
         except Exception:
             pass
         for url in parser.urls:
-            indicators.append({"source": "html_link", "url": url})
+            indicators.append({"source": "html_link", "url": urljoin(base_url, url)})
 
     # Source 3: Link HTTP header with rel="license" and application/rsl+xml
     if homepage_headers:
@@ -357,7 +333,7 @@ def run_rsl_step(
         if "application/rsl+xml" in link_header and 'rel="license"' in link_header:
             match = re.search(r"<([^>]+)>", link_header)
             if match:
-                indicators.append({"source": "http_header", "url": match.group(1)})
+                indicators.append({"source": "http_header", "url": urljoin(base_url, match.group(1))})
 
     return {
         "rsl_detected": len(indicators) > 0,

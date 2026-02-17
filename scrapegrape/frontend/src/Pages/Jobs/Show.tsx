@@ -25,6 +25,7 @@ interface JobProps {
         rsl_result: Record<string, unknown> | null
         ai_bot_result: Record<string, unknown> | null
         metadata_result: Record<string, unknown> | null
+        article_result: Record<string, unknown> | null
         created_at: string
     }
 }
@@ -39,6 +40,9 @@ const PIPELINE_STEPS = [
     { key: 'sitemap', label: 'Sitemap Discovery', icon: '7' },
     { key: 'rss', label: 'RSS Feed Discovery', icon: '8' },
     { key: 'rsl', label: 'RSL Detection', icon: '9' },
+    { key: 'article_extraction', label: 'Article Metadata', icon: '10' },
+    { key: 'paywall_detection', label: 'Paywall Detection', icon: '11' },
+    { key: 'metadata_profile', label: 'Metadata Profile', icon: '12' },
 ] as const
 
 function statusBadge(status: string) {
@@ -123,6 +127,34 @@ function stepDataSummary(step: string, data: Record<string, unknown>): string | 
     if (step === 'rsl') {
         if (data.rsl_detected) return `RSL detected (${data.count} indicator(s))`
         return 'No RSL licensing detected'
+    }
+    if (step === 'article_extraction') {
+        const formats = data.formats_found as string[] | undefined
+        if (formats && formats.length > 0) return `Found: ${formats.join(', ')}`
+        if (data.summary) return String(data.summary)
+        return 'No structured data found'
+    }
+    if (step === 'paywall_detection') {
+        const status = data.paywall_status as string | undefined
+        if (status) {
+            const label: Record<string, string> = {
+                free: 'Free access',
+                paywalled: 'Paywalled (hard)',
+                metered: 'Metered access',
+                unknown: 'Unknown',
+            }
+            let result = label[status] ?? status
+            if (data.schema_accessible !== undefined && data.schema_accessible !== null) {
+                result += ` (isAccessibleForFree: ${data.schema_accessible})`
+            }
+            return result
+        }
+        if (data.summary) return String(data.summary)
+        return null
+    }
+    if (step === 'metadata_profile') {
+        if (data.summary) return String(data.summary)
+        return null
     }
     if (data.reason) return String(data.reason)
     if (data.error) return `Error: ${String(data.error)}`
@@ -261,6 +293,36 @@ function Show({ job }: JobProps) {
         if (job.ai_bot_result) {
             statuses['ai_bot_blocking'] = { step: 'ai_bot_blocking', status: 'completed', data: job.ai_bot_result }
         }
+        if (job.article_result) {
+            const ar = job.article_result as Record<string, unknown>
+            statuses['article_extraction'] = {
+                step: 'article_extraction',
+                status: 'completed',
+                data: {
+                    formats_found: ar.formats_found,
+                    jsonld_fields: ar.jsonld_fields,
+                    opengraph_fields: ar.opengraph_fields,
+                    microdata_fields: ar.microdata_fields,
+                    twitter_cards: ar.twitter_cards,
+                },
+            }
+            const paywall = ar.paywall as Record<string, unknown> | undefined
+            if (paywall) {
+                statuses['paywall_detection'] = {
+                    step: 'paywall_detection',
+                    status: 'completed',
+                    data: paywall,
+                }
+            }
+            const profile = ar.profile as Record<string, unknown> | undefined
+            if (profile) {
+                statuses['metadata_profile'] = {
+                    step: 'metadata_profile',
+                    status: 'completed',
+                    data: profile,
+                }
+            }
+        }
         // For completed jobs, any step without result data was skipped (freshness TTL)
         if (job.status === 'completed') {
             for (const step of PIPELINE_STEPS) {
@@ -367,7 +429,19 @@ function Show({ job }: JobProps) {
 
             {/* Step Cards */}
             <div className="space-y-3">
-                {PIPELINE_STEPS.map((step) => (
+                {PIPELINE_STEPS.slice(0, 9).map((step) => (
+                    <StepCard
+                        key={step.key}
+                        step={step}
+                        event={mergedStatuses[step.key]}
+                    />
+                ))}
+
+                <div className="pt-2 pb-1">
+                    <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide">Article Analysis</h3>
+                </div>
+
+                {PIPELINE_STEPS.slice(9).map((step) => (
                     <StepCard
                         key={step.key}
                         step={step}

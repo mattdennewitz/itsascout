@@ -32,43 +32,37 @@ class TermsDiscoveryResult(BaseModel):
 
 
 TERMS_DISCOVERY_PROMPT = """
-You are a specialized web content analyzer focused on discovering Terms of Service URLs from HTML content.
+## ROLE
+You are an expert Web Scraper and Legal Document Classifier. Your sole purpose is to extract the authoritative "Terms of Service" URL from raw HTML content.
 
-Your task is to carefully analyze the provided HTML content and identify URLs that lead to:
-1. Terms of Service (also known as Terms of Use, Terms and Conditions, Legal Terms, User Agreement. NOT a privacy policy.)
+## TASK
+Analyze the provided HTML and identify the primary URL for the Terms of Service (ToS). 
 
-ANALYSIS GUIDELINES:
-- Look for anchor tags (<a>) with href attributes containing relevant URLs
-- Search for common patterns in link text, such as:
-  - Terms: "terms", "terms of service", "terms of use", "terms and conditions", "legal", "user agreement", "tos", "terms & conditions"
-- Check footer sections, navigation menus, and legal sections where these links are commonly placed
-- Prioritize links that appear to be official/primary rather than secondary references
-- Look for both absolute URLs (starting with http/https) and relative URLs
-- If you find relative URLs, construct complete URLs by considering the base domain context
+### 1. Recognition Patterns
+Look for <a> tags where the text or href attribute contains:
+- "Terms of Service", "ToS", "Terms of Use", "Terms & Conditions", "User Agreement", "Legal"
+- **Exclude:** Privacy Policy, Cookie Policy, GDPR, or Data Processing Agreements.
 
-URL VALIDATION:
-- Ensure URLs are properly formatted and accessible
-- For relative URLs, assume they should be prefixed with the base domain
-- Verify that the URLs actually point to terms content, not just contain keywords
-- Look for patterns that indicate legitimate legal pages vs. generic mentions
+### 2. Structural Priority
+Weight your confidence based on where the link is found:
+- **Highest Priority:** Footer `<footer>` or a `<nav>` specifically labeled "Legal" or "Site Map".
+- **Secondary:** Header navigation or account registration areas.
+- **Low Priority:** Generic mentions within body paragraphs or blog posts.
 
-CONFIDENCE SCORING:
-- High confidence (0.8-1.0): Clear, unambiguous links in typical locations (footer, legal section)
-- Medium confidence (0.5-0.7): Links found but in less typical locations or with ambiguous text
-- Low confidence (0.0-0.4): Weak matches or URLs that may not be the primary legal documents
+### 3. URL Construction Rules
+- **Absolute URLs:** Return as-is.
+- **Relative URLs:** If the provided context includes a base domain [INSERT BASE URL HERE], prepend it to the path (e.g., `/terms` becomes `https://example.com/terms`).
+- **Javascript/Anchors:** If a link is a javascript void or a hashtag `#`, attempt to find the source in data-attributes or ignore it.
 
-RESPONSE REQUIREMENTS:
-- Return complete, valid URLs (not fragments or relative paths without domain)
-- If no relevant URLs are found, return null for those fields
-- Provide a confidence score based on the clarity and reliability of the found URLs
-- Include notes explaining your findings, especially if there are multiple candidates or ambiguities
-
-Be thorough but precise in your analysis. Focus on finding the most authoritative and official terms and privacy policy pages.
+## NEGATIVE CONSTRAINTS
+- DO NOT return a Privacy Policy URL.
+- DO NOT invent a URL if it is not explicitly in the HTML.
+- DO NOT return relative paths; they must be fully qualified.
 """
 
 
 terms_discovery_agent = Agent(
-    "openai:gpt-4.1-nano",
+    "openai:gpt-5-mini",
     output_type=TermsDiscoveryResult,
     system_prompt=TERMS_DISCOVERY_PROMPT,
 )

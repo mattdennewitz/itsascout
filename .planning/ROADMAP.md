@@ -101,10 +101,11 @@ Plans:
   2. Pipeline detects paywall status from isAccessibleForFree schema.org markup
   3. LLM generates a human-readable summary of what metadata is available on the publisher's article pages
   4. Report shows yes/no indicators for each structured data format present (JSON-LD, OpenGraph, Microdata)
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 10-01: Article metadata extraction, paywall detection, and LLM profiling
+- [ ] 10-01-PLAN.md -- ArticleMetadata model and article step functions with TDD
+- [ ] 10-02-PLAN.md -- Supervisor wiring, frontend article steps, and integration tests
 
 ### Phase 11: Report Card UI
 **Goal:** User sees a complete, polished report card with publisher-level and article-level findings, and the full pipeline is verified end-to-end
@@ -136,7 +137,7 @@ Plans:
 | 7. Fetch Strategy | v2.0 | 1/1 | Complete | 2026-02-14 |
 | 8. Core Pipeline & SSE | v2.0 | 3/3 | Complete | 2026-02-14 |
 | 9. Publisher Discovery | v2.0 | 2/2 | Complete | 2026-02-14 |
-| 10. Article Metadata | v2.0 | 0/1 | Not started | - |
+| 10. Article Metadata | v2.0 | 0/2 | Not started | - |
 | 11. Report Card UI | v2.0 | 0/2 | Not started | - |
 
 **v2.0 Overall:** 27/34 requirements complete (79%)

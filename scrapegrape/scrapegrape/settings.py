@@ -148,6 +148,7 @@ RQ_QUEUES = {
 }
 
 PUBLISHER_FRESHNESS_TTL = timedelta(hours=24)
+ARTICLE_FRESHNESS_TTL = timedelta(hours=24)
 
 # Django Vite configuration
 DJANGO_VITE = {

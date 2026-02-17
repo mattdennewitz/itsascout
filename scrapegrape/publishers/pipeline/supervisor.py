@@ -9,6 +9,8 @@ from publishers.fetchers.manager import FetchStrategyManager
 from publishers.models import ResolutionJob
 from publishers.pipeline.events import publish_step_event
 from publishers.pipeline.steps import (
+    run_ai_bot_blocking_step,
+    run_publisher_details_step,
     run_robots_step,
     run_rss_step,
     run_rsl_step,
@@ -53,11 +55,11 @@ def run_pipeline(job_id: str):
     publisher = resolution_job.publisher
 
     try:
-        # Step 0: Publisher resolution (already done at job creation)
+        # Step 0: Publisher details starts (resolution data available immediately)
         publish_step_event(
             job_id,
-            "publisher_resolution",
-            "completed",
+            "publisher_details",
+            "started",
             {"publisher_name": publisher.name, "domain": publisher.domain},
         )
 
@@ -74,9 +76,11 @@ def run_pipeline(job_id: str):
                 job_id, "tos_evaluation", "skipped", {"reason": "fresh"}
             )
             publish_step_event(job_id, "robots", "skipped", {"reason": "fresh"})
+            publish_step_event(job_id, "ai_bot_blocking", "skipped", {"reason": "fresh"})
             publish_step_event(job_id, "sitemap", "skipped", {"reason": "fresh"})
             publish_step_event(job_id, "rss", "skipped", {"reason": "fresh"})
             publish_step_event(job_id, "rsl", "skipped", {"reason": "fresh"})
+            publish_step_event(job_id, "publisher_details", "skipped", {"reason": "fresh"})
         else:
             # Step 1: WAF check
             publish_step_event(job_id, "waf", "started")
@@ -134,12 +138,19 @@ def run_pipeline(job_id: str):
 
             # Update publisher flat fields
             publisher.robots_txt_found = robots_result.get("robots_found", False)
-            publisher.robots_txt_url_allowed = robots_result.get("url_allowed")
-            publisher.save(
-                update_fields=["robots_txt_found", "robots_txt_url_allowed"]
-            )
+            publisher.save(update_fields=["robots_txt_found"])
 
-            # Step 5: Sitemap discovery
+            # Step 5: AI bot blocking detection
+            publish_step_event(job_id, "ai_bot_blocking", "started")
+            ai_bot_result = run_ai_bot_blocking_step(publisher, robots_result)
+            resolution_job.ai_bot_result = ai_bot_result
+            resolution_job.save(update_fields=["ai_bot_result"])
+            publish_step_event(job_id, "ai_bot_blocking", "completed", ai_bot_result)
+
+            publisher.ai_bot_blocks = ai_bot_result.get("bots")
+            publisher.save(update_fields=["ai_bot_blocks"])
+
+            # Step 6: Sitemap discovery
             publish_step_event(job_id, "sitemap", "started")
             sitemap_result = run_sitemap_step(publisher, robots_result)
             resolution_job.sitemap_result = sitemap_result
@@ -173,6 +184,23 @@ def run_pipeline(job_id: str):
 
             publisher.rsl_detected = rsl_result.get("rsl_detected", False)
             publisher.save(update_fields=["rsl_detected"])
+
+            # Step 8: Publisher details (structured data — already "started" at pipeline begin)
+            details_result = run_publisher_details_step(publisher, homepage_html)
+            resolution_job.metadata_result = details_result
+            resolution_job.save(update_fields=["metadata_result"])
+            publish_step_event(job_id, "publisher_details", "completed", details_result)
+
+            publisher.publisher_details = details_result.get("organization")
+            update_fields = ["publisher_details"]
+
+            # Update publisher name from structured data if still set to domain
+            org = details_result.get("organization")
+            if org and org.get("name") and publisher.name == publisher.domain:
+                publisher.name = org["name"]
+                update_fields.append("name")
+
+            publisher.save(update_fields=update_fields)
 
             # Update freshness timestamp
             publisher.last_checked_at = timezone.now()

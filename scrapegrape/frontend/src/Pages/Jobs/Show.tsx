@@ -23,19 +23,22 @@ interface JobProps {
         sitemap_result: Record<string, unknown> | null
         rss_result: Record<string, unknown> | null
         rsl_result: Record<string, unknown> | null
+        ai_bot_result: Record<string, unknown> | null
+        metadata_result: Record<string, unknown> | null
         created_at: string
     }
 }
 
 const PIPELINE_STEPS = [
-    { key: 'publisher_resolution', label: 'Publisher Resolution', icon: '1' },
+    { key: 'publisher_details', label: 'Publisher Details', icon: '1' },
     { key: 'waf', label: 'WAF Detection', icon: '2' },
     { key: 'tos_discovery', label: 'ToS Discovery', icon: '3' },
     { key: 'tos_evaluation', label: 'ToS Evaluation', icon: '4' },
     { key: 'robots', label: 'robots.txt Analysis', icon: '5' },
-    { key: 'sitemap', label: 'Sitemap Discovery', icon: '6' },
-    { key: 'rss', label: 'RSS Feed Discovery', icon: '7' },
-    { key: 'rsl', label: 'RSL Detection', icon: '8' },
+    { key: 'ai_bot_blocking', label: 'AI Bot Blocking', icon: '6' },
+    { key: 'sitemap', label: 'Sitemap Discovery', icon: '7' },
+    { key: 'rss', label: 'RSS Feed Discovery', icon: '8' },
+    { key: 'rsl', label: 'RSL Detection', icon: '9' },
 ] as const
 
 function statusBadge(status: string) {
@@ -60,7 +63,16 @@ function truncateUrl(url: string, maxLen = 60): string {
 function stepDataSummary(step: string, data: Record<string, unknown>): string | null {
     if (!data || Object.keys(data).length === 0) return null
 
-    if (step === 'publisher_resolution') {
+    if (step === 'publisher_details') {
+        // Full details data (from metadata extraction)
+        if (data.found && data.organization) {
+            const org = data.organization as Record<string, unknown>
+            const name = org.name ?? 'Unknown'
+            const type = org.type ?? 'Organization'
+            return `${name} (${type}, via ${data.source})`
+        }
+        if (data.found === false) return 'No structured organization data found'
+        // Resolution data (just name/domain, shown while running)
         if (data.publisher_name) return `Resolved: ${data.publisher_name} (${data.domain ?? ''})`
         return null
     }
@@ -75,10 +87,14 @@ function stepDataSummary(step: string, data: Record<string, unknown>): string | 
         return null
     }
     if (step === 'tos_evaluation') {
+        if (data.error) return `Error: ${String(data.error)}`
         if (data.scraping_permitted !== undefined) {
             return data.scraping_permitted ? 'Scraping: Permitted' : 'Scraping: Restricted'
         }
-        if (data.permissions) return `Permissions: ${JSON.stringify(data.permissions)}`
+        if (Array.isArray(data.permissions)) {
+            const count = (data.permissions as unknown[]).length
+            return `${count} activit${count === 1 ? 'y' : 'ies'} evaluated`
+        }
         return null
     }
     if (step === 'robots') {
@@ -86,6 +102,13 @@ function stepDataSummary(step: string, data: Record<string, unknown>): string | 
         if (data.url_allowed === true) return 'URL allowed by robots.txt'
         if (data.url_allowed === false) return 'URL disallowed by robots.txt'
         return null
+    }
+    if (step === 'ai_bot_blocking') {
+        const blocked = data.blocked_count as number
+        const total = data.total_count as number
+        if (!data.robots_found) return 'No robots.txt available'
+        if (blocked === 0) return 'No AI bots blocked'
+        return `${blocked}/${total} AI bots blocked`
     }
     if (step === 'sitemap') {
         const count = data.count as number
@@ -182,11 +205,19 @@ function Show({ job }: JobProps) {
 
         const statuses: Record<string, PipelineEvent> = {}
 
-        // Publisher resolution is always completed for finished jobs
-        statuses['publisher_resolution'] = {
-            step: 'publisher_resolution',
-            status: 'completed',
-            data: { publisher_name: job.publisher_name, domain: job.publisher_domain },
+        // Publisher details: use metadata_result if available, otherwise just name/domain
+        if (job.metadata_result) {
+            statuses['publisher_details'] = {
+                step: 'publisher_details',
+                status: 'completed',
+                data: job.metadata_result,
+            }
+        } else {
+            statuses['publisher_details'] = {
+                step: 'publisher_details',
+                status: 'completed',
+                data: { publisher_name: job.publisher_name, domain: job.publisher_domain },
+            }
         }
 
         if (job.waf_result) {
@@ -226,6 +257,21 @@ function Show({ job }: JobProps) {
         }
         if (job.rsl_result) {
             statuses['rsl'] = { step: 'rsl', status: 'completed', data: job.rsl_result }
+        }
+        if (job.ai_bot_result) {
+            statuses['ai_bot_blocking'] = { step: 'ai_bot_blocking', status: 'completed', data: job.ai_bot_result }
+        }
+        // For completed jobs, any step without result data was skipped (freshness TTL)
+        if (job.status === 'completed') {
+            for (const step of PIPELINE_STEPS) {
+                if (!statuses[step.key]) {
+                    statuses[step.key] = {
+                        step: step.key,
+                        status: 'skipped',
+                        data: { reason: 'fresh' },
+                    }
+                }
+            }
         }
 
         return statuses

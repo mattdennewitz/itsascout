@@ -1022,12 +1022,6 @@ class MetadataProfileResult(BaseModel):
         description="Human-readable 2-4 sentence summary of what metadata formats "
         "are present, what key fields are populated, and overall metadata quality",
     )
-    quality_score: float = Field(
-        0.0,
-        ge=0.0,
-        le=1.0,
-        description="Overall metadata quality score",
-    )
 
 
 METADATA_PROFILE_PROMPT = """You are a structured data analyst. Given the extracted metadata
@@ -1057,4 +1051,4 @@ def run_metadata_profile_step(extraction_result: dict, article_url: str) -> dict
         return result.output.model_dump()
     except Exception as exc:
         logger.error(f"Metadata profile step error for {article_url}: {exc}")
-        return {"summary": "", "quality_score": 0.0, "error": str(exc)}
+        return {"summary": "", "error": str(exc)}

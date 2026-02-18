@@ -113,7 +113,6 @@ def _mock_pipeline_sync(job_id):
         },
         "profile": {
             "summary": "Well-structured article with JSON-LD and OpenGraph metadata.",
-            "quality_score": 78,
         },
     }
 

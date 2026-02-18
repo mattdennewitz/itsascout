@@ -698,11 +698,6 @@ function ReportCard({ job }: { job: JobProps['job'] }) {
                             <div className="flex items-center gap-2 mb-1">
                                 <FileText className="size-4 text-muted-foreground" />
                                 <span className="text-sm font-medium">Metadata Profile</span>
-                                {profile.quality_score !== undefined && profile.quality_score !== null && (
-                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700">
-                                        Score: {String(profile.quality_score)}
-                                    </span>
-                                )}
                             </div>
                             <p className="text-sm text-muted-foreground leading-relaxed pl-6">
                                 {profile.summary as string}

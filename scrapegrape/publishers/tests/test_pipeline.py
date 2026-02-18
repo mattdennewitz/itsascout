@@ -414,7 +414,7 @@ class TestRunPipeline:
         )
         monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_metadata_profile_step",
-            lambda extraction, url: {"summary": "Test summary", "quality_score": 0.5},
+            lambda extraction, url: {"summary": "Test summary"},
         )
 
         run_pipeline(str(job.id))
@@ -654,7 +654,7 @@ class TestRunPipeline:
         )
         monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_metadata_profile_step",
-            lambda extraction, url: {"summary": "Test", "quality_score": 0.5},
+            lambda extraction, url: {"summary": "Test"},
         )
 
         run_pipeline(str(job.id))
@@ -757,7 +757,7 @@ class TestRunPipeline:
         )
         monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_metadata_profile_step",
-            lambda extraction, url: {"summary": "", "quality_score": 0.0},
+            lambda extraction, url: {"summary": ""},
         )
 
         run_pipeline(str(job.id))
@@ -851,7 +851,7 @@ class TestRunPipeline:
         )
         monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_metadata_profile_step",
-            lambda extraction, url: {"summary": "", "quality_score": 0.0},
+            lambda extraction, url: {"summary": ""},
         )
 
         run_pipeline(str(job.id))
@@ -943,7 +943,7 @@ class TestRunPipeline:
         )
         monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_metadata_profile_step",
-            lambda extraction, url: {"summary": "", "quality_score": 0.0},
+            lambda extraction, url: {"summary": ""},
         )
 
         run_pipeline(str(job.id))
@@ -1033,7 +1033,7 @@ class TestRunPipeline:
         )
         monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_metadata_profile_step",
-            lambda extraction, url: {"summary": "", "quality_score": 0.0},
+            lambda extraction, url: {"summary": ""},
         )
 
         run_pipeline(str(job.id))
@@ -1114,7 +1114,7 @@ class TestRunPipeline:
         )
         monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_metadata_profile_step",
-            lambda extraction, url: {"summary": "Rich metadata profile", "quality_score": 0.9},
+            lambda extraction, url: {"summary": "Rich metadata profile"},
         )
 
         run_pipeline(str(job.id))
@@ -1220,7 +1220,7 @@ class TestRunPipeline:
         )
         monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_metadata_profile_step",
-            lambda extraction, url: {"summary": "", "quality_score": 0.0},
+            lambda extraction, url: {"summary": ""},
         )
 
         run_pipeline(str(job.id))
@@ -1314,7 +1314,7 @@ class TestRunPipeline:
         )
         monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_metadata_profile_step",
-            lambda extraction, url: {"summary": "", "quality_score": 0.0},
+            lambda extraction, url: {"summary": ""},
         )
 
         run_pipeline(str(job.id))
@@ -2284,7 +2284,6 @@ class TestRunMetadataProfileStep:
         mock_output.output = MagicMock()
         mock_output.output.model_dump.return_value = {
             "summary": "This article has JSON-LD and OpenGraph metadata.",
-            "quality_score": 0.85,
         }
         monkeypatch.setattr(
             steps, "metadata_profile_agent",
@@ -2296,7 +2295,6 @@ class TestRunMetadataProfileStep:
             "https://example.com/article",
         )
         assert result["summary"] == "This article has JSON-LD and OpenGraph metadata."
-        assert result["quality_score"] == 0.85
 
     def test_metadata_profile_handles_error(self, monkeypatch):
         """agent raises -> returns error dict."""
@@ -2311,5 +2309,4 @@ class TestRunMetadataProfileStep:
             "https://example.com/article",
         )
         assert result["summary"] == ""
-        assert result["quality_score"] == 0.0
         assert "error" in result

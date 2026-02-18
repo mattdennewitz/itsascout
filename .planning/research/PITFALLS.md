@@ -1,399 +1,388 @@
-# Pitfalls Research
+# Domain Pitfalls: Competitive Intelligence Features
 
-**Domain:** Adding URL analysis workflow (SSE streaming, RQ task pipeline, curl-cffi fetching, metadata extraction) to existing Django 5.2 + Inertia.js + React 19 app
-**Researched:** 2026-02-13
-**Confidence:** MEDIUM (verified across official docs, GitHub issues, and community sources; some curl-cffi specifics are LOW confidence)
+**Domain:** Adding Common Crawl presence, Google News inclusion, and update frequency estimation to existing publisher analysis pipeline
+**Researched:** 2026-02-17
+**Confidence:** MEDIUM (CC Index API behavior verified via official docs and community reports; Google News detection is LOW confidence due to no official API; frequency estimation is MEDIUM based on sitemap/RSS standards)
+
+---
 
 ## Critical Pitfalls
 
-### Pitfall 1: InertiaMiddleware Interfering with SSE StreamingHttpResponse
+### Pitfall 1: Common Crawl Index API Timeouts Stalling the Entire Pipeline
 
 **What goes wrong:**
-SSE endpoints return `StreamingHttpResponse`, but the Inertia middleware runs on every request. While the current `InertiaMiddleware` checks for `X-Inertia` header and passes through non-Inertia requests, the custom `inertia_share` middleware in `scrapegrape/middleware.py` calls `share()` on every request -- including SSE endpoints. This attaches session-backed lazy props (auth, flash, errors) to SSE requests that never use them, causing unnecessary session reads and potential `session.pop()` side effects on SSE polling.
+The CC Index API (`index.commoncrawl.org`) is a single server that cannot be scaled up. Under load it returns HTTP 503 errors, and response times range from 2-15 seconds for a simple domain query. If the CC step is added as a blocking sequential step in the existing pipeline (like the other steps), a slow or failed CC query adds 15-30 seconds of latency to every analysis -- or worse, the step hangs until RQ's `job_timeout` kills the entire pipeline supervisor job.
 
 **Why it happens:**
-The Inertia middleware stack was designed assuming all routes are Inertia page requests. SSE endpoints are a fundamentally different response type (long-lived, streaming) that the middleware was never designed to handle. The `InertiaMiddleware` itself is safe (it checks `X-Inertia` header), but custom share middleware and Django's own `CommonMiddleware`, `SessionMiddleware`, and especially `GZipMiddleware` can all interfere.
+The CC Index server is a community resource with aggressive rate limiting. It is not designed for real-time interactive queries. Common Crawl's own documentation warns: "Please sleep between calls, don't run multiple threads at once on the same IP, and don't use proxy networks." If multiple users trigger analyses concurrently, your server makes parallel requests from the same IP, hitting rate limits and receiving 503s. Unlike the other pipeline steps (which hit the publisher's own infrastructure), CC is a shared third-party service with no SLA.
 
-**How to avoid:**
-1. SSE views must return `StreamingHttpResponse` with `Content-Type: text/event-stream`. The Inertia middleware will pass these through because the browser does not send `X-Inertia` headers on `EventSource` requests.
-2. Modify `inertia_share` middleware to skip SSE routes:
+**Consequences:**
+- Pipeline execution time increases by 5-30 seconds per analysis
+- Under rate limiting, CC step fails for all concurrent analyses
+- If CC step throws an unhandled exception, the existing `run_pipeline` supervisor catches it at the top level and marks the entire job as `failed` -- losing results from all previous steps (WAF, ToS, robots, sitemap, RSS, RSL, publisher details, article extraction)
+- IP gets temporarily blocked (24-hour cooldown) if rate limits are exceeded repeatedly
+
+**Prevention:**
+1. **Never block the main pipeline on CC queries.** The CC step should be non-critical: wrap it in a try/except with a generous timeout (10 seconds), and treat failure as "data unavailable" rather than pipeline failure:
 ```python
-def inertia_share(get_response):
-    def middleware(request):
-        # Skip Inertia sharing for SSE/API endpoints
-        if request.path.startswith('/api/') or request.path.startswith('/sse/'):
-            return get_response(request)
-        share(request, auth=lambda: {...}, flash=lambda: {...}, errors=lambda: {...})
-        return get_response(request)
-    return middleware
-```
-3. Do NOT add `GZipMiddleware` -- Django ticket #36655 confirms it buffers entire streaming responses, completely breaking SSE. If already present, exclude streaming responses.
-4. Set `Cache-Control: no-cache` and `X-Accel-Buffering: no` headers on SSE responses to prevent nginx proxy buffering.
-
-**Warning signs:**
-- SSE events arrive in batches instead of one-at-a-time
-- SSE connection succeeds but no events appear until connection closes
-- Session data (flash messages) disappearing unexpectedly after SSE connections
-- Browser DevTools EventStream tab shows nothing, then dumps everything at once
-
-**Phase to address:**
-Infrastructure phase (when adding SSE endpoint). Must be the first SSE integration test: verify a single event streams immediately to the browser.
-
----
-
-### Pitfall 2: WSGI Worker Exhaustion from Long-Lived SSE Connections
-
-**What goes wrong:**
-Each SSE connection holds a WSGI worker process for its entire lifetime. The current setup uses `WSGI_APPLICATION = "scrapegrape.wsgi.application"` with Django's dev server (and presumably gunicorn in production). With even 3-5 concurrent URL analyses, all gunicorn workers are occupied by SSE connections, and the entire app becomes unresponsive -- no pages load, no API calls succeed.
-
-**Why it happens:**
-WSGI was designed for short-lived request/response cycles. SSE connections are long-lived (30 seconds to several minutes for a full analysis pipeline). A typical gunicorn deployment has 2-4 workers per CPU core. Each SSE connection permanently occupies one worker until the analysis completes or the client disconnects.
-
-**How to avoid:**
-1. Use a dedicated SSE approach that does not hold WSGI workers:
-   - **Option A (Recommended):** Use Django's async view support with `StreamingHttpResponse` and an `async def` view, served via an ASGI server (uvicorn/daphne) for SSE routes only. The rest of the app stays WSGI.
-   - **Option B:** Use a separate lightweight SSE service (e.g., a small FastAPI/Starlette app) that reads progress from Redis and streams to clients. Django RQ workers write progress to Redis; the SSE service reads and streams it.
-   - **Option C:** Use polling instead of SSE. Client polls a `/api/job/<id>/status` endpoint every 2 seconds. Simpler but worse UX.
-2. If using gunicorn with SSE, switch to `--worker-class gthread` with `--threads 4-8` so each worker handles multiple connections. But this still has limits.
-3. Set aggressive SSE timeouts -- close the connection after the analysis completes (do not keep it open indefinitely).
-4. gunicorn `--timeout` must be higher than the maximum analysis duration, or workers will be killed mid-stream. Default 30 seconds will kill most analyses.
-
-**Warning signs:**
-- App becomes unresponsive when multiple analyses run simultaneously
-- gunicorn logs: `[CRITICAL] WORKER TIMEOUT`
-- SSE connections terminate prematurely with no error
-- CPU/memory usage stays low but requests queue up
-
-**Phase to address:**
-Infrastructure phase. This is an architectural decision that must be made before implementing SSE. Changing from WSGI to ASGI or adding a polling fallback after SSE is built is a significant rework.
-
----
-
-### Pitfall 3: RQ Dependent Jobs Silently Abandoned on Parent Failure
-
-**What goes wrong:**
-The URL analysis pipeline is a chain: URL normalization -> robots.txt check -> page fetch -> metadata extraction -> LLM publisher resolution. If an early job fails (e.g., robots.txt fetch times out), dependent jobs are never enqueued by default. The SSE stream shows the pipeline "stuck" at a step forever -- no error, no completion, no progress update.
-
-**Why it happens:**
-RQ's default behavior is to only enqueue dependent jobs when the parent succeeds. Jobs that fail are moved to `FailedJobRegistry`, and dependents stay in `DeferredJobRegistry` forever. There is a `Dependency(allow_failure=True)` option, but it has a known bug (GitHub issue #2006): jobs moved to `FailedJobRegistry` due to `AbandonedJobError` (worker crash, OOM) never trigger dependent enqueueing even with `allow_failure=True`.
-
-**How to avoid:**
-1. Use `on_failure` callbacks on every job in the chain to update progress state in Redis:
-```python
-from rq import Callback
-
-queue.enqueue(
-    fetch_page,
-    depends_on=Dependency(jobs=[robots_job], allow_failure=True),
-    on_failure=Callback(handle_step_failure),
-    on_success=Callback(handle_step_success),
-)
-
-def handle_step_failure(job, connection, type, value, traceback):
-    # Update Redis progress key so SSE stream can report the failure
-    redis_conn.hset(f"analysis:{job.meta['analysis_id']}", 'status', 'failed')
-    redis_conn.hset(f"analysis:{job.meta['analysis_id']}", 'error', str(value))
-    redis_conn.hset(f"analysis:{job.meta['analysis_id']}", 'failed_step', job.func_name)
-```
-2. Implement a "pipeline supervisor" pattern: a single parent job that orchestrates steps sequentially rather than chaining via `depends_on`. This gives you explicit error handling at each step:
-```python
-@job
-def run_analysis_pipeline(url, analysis_id):
-    update_progress(analysis_id, 'normalizing', 0)
-    normalized = normalize_url(url)
-
-    update_progress(analysis_id, 'checking_robots', 20)
+def run_cc_presence_step(publisher: Publisher) -> dict:
+    """Check Common Crawl index for domain presence. Non-critical step."""
     try:
-        robots_ok = check_robots(normalized)
-    except Exception as e:
-        update_progress(analysis_id, 'robots_failed', 20, error=str(e))
-        # Continue anyway or abort based on policy
-
-    update_progress(analysis_id, 'fetching', 40)
-    html = fetch_page(normalized)
-    # ... etc
+        result = _query_cc_index(publisher.domain, timeout=10)
+        return {"found": True, "crawl_count": result["count"], ...}
+    except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+        logger.warning(f"CC Index unavailable for {publisher.domain}: {exc}")
+        return {"found": None, "error": "CC Index unavailable", "skipped": True}
+    except Exception as exc:
+        logger.error(f"CC step error for {publisher.domain}: {exc}")
+        return {"found": None, "error": str(exc), "skipped": True}
 ```
-3. Set `job_timeout` on every job. Default RQ timeout is 180 seconds, but some steps (LLM calls, Zyte fetches) may need more. Without explicit timeouts, a stuck job holds the worker indefinitely.
-4. Monitor `FailedJobRegistry` and `DeferredJobRegistry` sizes. Orphaned deferred jobs indicate broken chains.
+2. **Cache CC results aggressively.** CC Index data changes monthly (new crawl). Cache domain lookup results for 7 days minimum. Use a separate cache key from the publisher freshness TTL since CC data changes on a different cadence than the publisher's own signals.
+3. **Query only the latest 1-2 crawl collections**, not all historical ones. Each collection query is a separate HTTP request. Querying `CC-MAIN-2026-06` is one call; querying the last 12 months is 12 calls. Start with the latest crawl only.
+4. **Use `matchType=domain` and `limit=1`** to minimize response size. You only need to know IF the domain is present, not enumerate every URL. A full domain enumeration for a large publisher returns megabytes of data and times out.
 
-**Warning signs:**
-- Progress bar gets stuck at a specific percentage and never moves
-- Redis `DeferredJobRegistry` grows over time
-- `FailedJobRegistry` has jobs but no corresponding error shown to user
-- Analysis jobs "complete" but some steps show no results
+**Detection:**
+- Pipeline duration increases by 10+ seconds after adding CC step
+- CC step shows "skipped" or "error" in >20% of analyses
+- Server logs show 503 responses from `index.commoncrawl.org`
 
 **Phase to address:**
-Task pipeline phase. The decision between dependency chaining vs. supervisor pattern is architectural and must happen before implementing individual pipeline steps.
+First implementation of CC step. Must be designed as non-critical from day one.
 
 ---
 
-### Pitfall 4: curl-cffi Session Crashes Python Process When Closing Streaming Connections
+### Pitfall 2: Google News Inclusion Detection Has No Reliable Programmatic Method
 
 **What goes wrong:**
-curl-cffi has a documented bug (GitHub issue #675) where closing a `Session` or `Response` during an incomplete streaming request causes a segfault -- the Python process crashes without a Python exception. If curl-cffi is used to fetch pages that respond slowly or use chunked transfer encoding, and you implement a timeout that cancels the request, the entire RQ worker process dies.
+There is no Google News API for checking whether a publisher is included in Google News. Every detection method has significant false positive or false negative rates. Teams typically try one of these approaches, all of which are unreliable:
+
+1. **Scraping `news.google.com/search?q=site:domain.com`**: Google actively blocks automated access. Returns CAPTCHAs, requires JavaScript rendering, changes HTML structure frequently. Even with a headless browser, this breaks every few weeks.
+2. **Using Google Custom Search API with `tbm=nws`**: The `tbm` parameter is not officially supported in the Custom Search JSON API. It works intermittently but Google can remove it at any time. Results are also not identical to actual Google News inclusion.
+3. **Checking for `news_keywords` meta tag or Google News sitemap**: These indicate the publisher *intends* to be in Google News, not that they *are* included. Many sites have these tags but are not in Google News, and many Google News sources lack these tags entirely.
+4. **Checking Google Publisher Center registration**: No public API exists for this.
 
 **Why it happens:**
-When `stream=True` is used and the response is not fully consumed before `close()` is called, curl-cffi's underlying C library (curl-impersonate) has a cleanup race condition. The Python interpreter exits abruptly (segfault from curl handle cleanup). Setting `keep_alive=False` reduces but does not eliminate the crash.
+Google News inclusion is algorithmically determined and not publicly queryable. Google deliberately does not expose a "is this site in Google News?" API. The inclusion process is opaque -- sites are automatically discovered based on editorial standards, E-E-A-T signals, and content quality. There is no binary "approved/not approved" status anymore (Google moved away from manual application in ~2019).
 
-**How to avoid:**
-1. Never use `stream=True` with curl-cffi for page fetching. Always consume the full response:
+**Consequences:**
+- Building a detection feature that returns confident YES/NO creates false trust in the data
+- Scraping-based approaches break frequently, requiring ongoing maintenance
+- False positives (saying a site IS in Google News when it isn't) damage credibility of the report card
+- False negatives (missing legitimate Google News publishers) make the tool seem incomplete
+
+**Prevention:**
+1. **Use heuristic signals, not a binary detector.** Instead of "Is in Google News: YES/NO", report "Google News signals" as a collection of indicators:
 ```python
-from curl_cffi.requests import Session
+def run_google_news_signals_step(publisher: Publisher, homepage_html: str) -> dict:
+    signals = []
 
-with Session(impersonate="chrome") as s:
-    response = s.get(url, timeout=30)  # NOT stream=True
-    html = response.text
+    # Signal 1: Google News sitemap present
+    # (Already have sitemap_result from earlier step)
+
+    # Signal 2: news_keywords meta tag
+    if 'name="news_keywords"' in homepage_html.lower():
+        signals.append({"signal": "news_keywords_meta", "weight": 0.3})
+
+    # Signal 3: NewsMediaOrganization schema.org type
+    # (Already extracted in publisher_details step)
+
+    # Signal 4: Google Publisher Center meta/link tag
+    if 'googlenewspublisher' in homepage_html.lower():
+        signals.append({"signal": "publisher_center_tag", "weight": 0.2})
+
+    # Signal 5: Standout tag or editors-pick tag
+    if 'standout' in homepage_html.lower():
+        signals.append({"signal": "standout_tag", "weight": 0.2})
+
+    return {
+        "signals": signals,
+        "signal_count": len(signals),
+        "likelihood": "high" if len(signals) >= 3 else "medium" if len(signals) >= 1 else "low",
+    }
 ```
-2. Always use curl-cffi `Session` as a context manager (`with Session() as s:`) to ensure proper cleanup.
-3. Set explicit `timeout` on every request. curl-cffi's stream mode timeout has documented issues where timeout has no effect during streaming.
-4. If you need to abort a long-running fetch, do it via `signal.alarm()` or RQ's `job_timeout` rather than trying to close the curl-cffi session mid-stream.
-5. For the Zyte fallback path, continue using `requests` (as the existing `fetch_html_via_proxy` does) -- do not switch Zyte calls to curl-cffi.
+2. **Label the output as "Google News Signals" or "Google News Likelihood", never "Google News Status: Approved/Not Approved."** This sets correct user expectations.
+3. **Reuse data already collected.** The existing pipeline already fetches homepage HTML, parses structured data, and discovers sitemaps. Most Google News signals come from data you already have -- no additional external API calls needed.
+4. **Do NOT scrape Google News directly.** It violates Google's ToS, is fragile, and adds an external dependency with no SLA. If you later want higher-confidence detection, use a SERP API (SerpAPI, HasData) as a paid service with proper rate limits.
 
-**Warning signs:**
-- RQ worker processes disappearing with no Python traceback
-- `Segmentation fault` in Docker logs
-- Workers constantly restarting
-- Jobs marked as `lost` in RQ dashboard
+**Detection:**
+- Google News detection results contradicted by manual checks
+- Feature returns "unknown" for >50% of publishers
+- Scraping-based detection starts failing across all queries simultaneously
 
 **Phase to address:**
-Page fetching phase. Must be validated early with a smoke test against slow/chunked-response sites before building the full pipeline on top of curl-cffi.
+Implementation phase. The key decision (heuristic signals vs. scraping) must be made before writing any code. Choose signals.
 
 ---
 
-### Pitfall 5: URL Normalization Creating Duplicate Publishers
+### Pitfall 3: Frequency Estimation from Sparse Sitemap/RSS Data Produces Misleading Results
 
 **What goes wrong:**
-The existing `normalize_url()` in `tasks.py` strips to `scheme://netloc`, but URLs arrive in many forms: `https://www.nytimes.com`, `https://nytimes.com`, `https://NYTimes.com`, `https://www.nytimes.com/`, `http://nytimes.com`. Each creates a different `Publisher` record because `Publisher.objects.get_or_create(url=base_url)` does exact string matching. Over time, the database fills with duplicate publishers that should be the same entity.
+The pipeline already discovers sitemaps and RSS feeds. The natural next step is to estimate publishing frequency from `<lastmod>` timestamps in sitemaps or `<pubDate>` in RSS items. But this data is severely limited:
+
+- **RSS feeds typically contain only 10-20 most recent items.** If a publisher posts 50 articles/day, the RSS feed shows only the last few hours. If they post once a week, the RSS shows 10-20 weeks. The time window is inconsistent and not discoverable without parsing.
+- **Sitemap `<lastmod>` values are unreliable.** Google ignores `<changefreq>` entirely. Many CMS platforms set `<lastmod>` to the current date on every sitemap regeneration (WordPress does this by default), making all URLs appear to have been updated "today."
+- **Sitemap `<changefreq>` is meaningless.** The sitemaps.org protocol includes it, but Google and Bing both ignore it. Many sites set it to "daily" for all URLs regardless of actual update frequency.
+- **Large sitemaps are paginated.** A publisher's sitemap index may reference 100+ sub-sitemaps. Fetching all of them to count URLs and extract dates adds significant latency (100 HTTP requests) and may trigger WAF rate limiting on the publisher's site.
 
 **Why it happens:**
-The current normalization is minimal: `f"{parsed_url.scheme}://{parsed_url.netloc}"`. It does not:
-- Lowercase the hostname (`NYTimes.com` vs `nytimes.com`)
-- Strip `www.` prefix consistently (name extraction does this, but URL storage does not)
-- Normalize scheme (`http` vs `https`)
-- Handle trailing slashes
-- Handle IDN/punycode domains (`xn--...`)
-- Handle port numbers (`:80` for HTTP, `:443` for HTTPS are default and should be stripped)
+RSS and sitemaps were not designed as frequency estimation tools. RSS is a notification mechanism ("here are the latest items"), not a comprehensive publication log. Sitemaps are discovery aids ("here are URLs to crawl"), not a publication timeline. Using them for frequency estimation is an off-label use that works only when the data happens to be well-formed and representative.
 
-**How to avoid:**
-1. Implement a proper normalization function:
+**Consequences:**
+- Reporting "publishes 3 articles/day" when the real number is 50 (RSS truncation)
+- Reporting "updated today" for every URL because the CMS regenerates sitemaps with current timestamps
+- Spending 30+ seconds fetching paginated sitemaps, doubling pipeline time
+- Reporting "unknown" for publishers with dynamic sitemaps (generated on request, no static XML files)
+
+**Prevention:**
+1. **Use RSS dates as the primary signal, sitemap `<lastmod>` as secondary, and `<changefreq>` never.** RSS `<pubDate>` values are almost always accurate because feed readers depend on them. Sitemap `<lastmod>` is unreliable.
+2. **Be honest about the data window.** If you have 15 RSS items spanning 3 days, report "approximately 5 articles/day (estimated from 15 items over 3 days)" -- not just "5 articles/day." The confidence interval matters:
 ```python
-from urllib.parse import urlparse
+def estimate_frequency(items: list[dict]) -> dict:
+    if not items or len(items) < 2:
+        return {"frequency": None, "confidence": "insufficient_data"}
 
-def normalize_publisher_url(url: str) -> str:
-    """Canonical publisher URL for deduplication."""
-    parsed = urlparse(url.strip())
+    dates = sorted([item["date"] for item in items if item.get("date")])
+    if len(dates) < 2:
+        return {"frequency": None, "confidence": "insufficient_data"}
 
-    # Default to https
-    scheme = 'https'
+    span = (dates[-1] - dates[0]).total_seconds()
+    if span < 3600:  # Less than 1 hour of data
+        return {"frequency": None, "confidence": "insufficient_span"}
 
-    # Lowercase and strip www
-    hostname = parsed.hostname.lower() if parsed.hostname else ''
-    if hostname.startswith('www.'):
-        hostname = hostname[4:]
+    items_per_day = (len(dates) - 1) / (span / 86400) if span > 0 else None
 
-    # Strip default ports
-    port = parsed.port
-    if port in (80, 443, None):
-        port_str = ''
-    else:
-        port_str = f':{port}'
-
-    return f'{scheme}://{hostname}{port_str}'
+    return {
+        "items_per_day": round(items_per_day, 1) if items_per_day else None,
+        "sample_size": len(dates),
+        "sample_span_hours": round(span / 3600, 1),
+        "confidence": "high" if len(dates) >= 10 and span > 86400 * 3 else
+                      "medium" if len(dates) >= 5 and span > 86400 else "low",
+        "source": "rss",
+    }
 ```
-2. Add a database unique constraint or index on the normalized URL.
-3. Migrate existing publisher URLs to normalized form before deploying the new pipeline.
-4. Use the `url-normalize` library for comprehensive edge case handling (IDN, unicode NFC normalization, dot-segment removal) if you encounter international domains.
+3. **Do NOT fetch full sitemaps for frequency estimation.** Only fetch the first sitemap (or sitemap index) and parse the first page. If you need URL counts, use the sitemap index to count sub-sitemaps and estimate (e.g., "sitemap index has 47 sub-sitemaps, typical WordPress sub-sitemap has 1000 URLs, so approximately 47,000 URLs"). Do not enumerate all URLs.
+4. **Fetch RSS feed content once, reuse for frequency.** The pipeline already discovers RSS feed URLs in `run_rss_step`. Add a follow-up step that fetches the actual feed content and parses dates. Do not re-discover the feed.
+5. **Validate `<lastmod>` before using it.** If >80% of URLs in a sitemap have the same `<lastmod>` date, the dates are likely auto-generated and unreliable. Discard them:
+```python
+def validate_lastmod_dates(dates: list[datetime]) -> bool:
+    """Return False if dates appear auto-generated (all same date)."""
+    if not dates:
+        return False
+    unique_dates = set(d.date() for d in dates)
+    # If >80% of dates fall on the same calendar day, they are likely bogus
+    most_common_count = max(Counter(d.date() for d in dates).values())
+    return most_common_count / len(dates) < 0.8
+```
 
-**Warning signs:**
-- Publisher count grows faster than expected
-- Same publisher name appears multiple times in the table
-- WAF reports and terms results split across duplicate publisher records
-- LLM publisher resolution returns different names for what should be the same publisher
+**Detection:**
+- Frequency estimates wildly different from what manual inspection of the site suggests
+- All sitemap URLs showing the same `<lastmod>` date
+- Frequency step taking >10 seconds (fetching too many sitemaps)
 
 **Phase to address:**
-URL normalization phase (must be one of the first steps). This is a data model concern that affects everything downstream. Retroactive deduplication is painful.
+Frequency estimation implementation. The RSS parsing sub-step should be built and validated before attempting sitemap-based frequency estimation.
 
 ---
 
-### Pitfall 6: SSE Connection Not Cleaned Up on React Component Unmount
+## Moderate Pitfalls
+
+### Pitfall 4: CC Index API Query Format Gotchas
 
 **What goes wrong:**
-User starts a URL analysis, sees the progress stream, then navigates away (Inertia client-side navigation). The `EventSource` connection stays open because the component unmounted without closing it. The server-side SSE view keeps the WSGI/ASGI worker occupied, streaming events into the void. With Inertia's client-side navigation, this happens on every page change -- users accumulate zombie SSE connections.
+The CC Index API has non-obvious query semantics that produce wrong results:
 
-**Why it happens:**
-Inertia's `router.visit()` unmounts the current page component and mounts the new one. If the `EventSource` is created in a `useEffect` without a cleanup function, or if the cleanup function has a stale closure over the `EventSource` ref, the connection is never closed. Using `useState` to store the `EventSource` instance instead of `useRef` causes re-renders that can create duplicate connections.
+- **Domain queries require `*.domain.com` wildcard prefix** to match subdomains. Querying `nytimes.com` only matches exactly `nytimes.com`, not `www.nytimes.com` or `cooking.nytimes.com`. Most real crawl data is under `www.` subdomains.
+- **Each crawl collection is a separate API endpoint.** There is no "query across all crawls" endpoint. You must know the collection name (e.g., `CC-MAIN-2026-05`) and query it specifically. The list of available collections must be fetched from `https://index.commoncrawl.org/collinfo.json`.
+- **Response format is NDJSON (newline-delimited JSON), not a JSON array.** Each line is a separate JSON object. Using `response.json()` will fail. You must parse line by line.
+- **Pagination uses `page` and `pageSize` parameters measured in index blocks, not result count.** The default page size is 5 blocks. You cannot predict how many results are in a page without fetching it.
 
-**How to avoid:**
-```typescript
-function AnalysisProgress({ analysisId }: { analysisId: string }) {
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    const es = new EventSource(`/sse/analysis/${analysisId}/`);
-    eventSourceRef.current = es;
-
-    es.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      // update state...
-    };
-
-    es.addEventListener('complete', () => {
-      es.close(); // Close when pipeline finishes
-      eventSourceRef.current = null;
-    });
-
-    es.onerror = () => {
-      // Only reconnect if not intentionally closed
-      if (es.readyState === EventSource.CLOSED) {
-        reconnectTimeoutRef.current = setTimeout(() => {
-          // reconnect logic with backoff
-        }, 3000);
-      }
-    };
-
-    // CRITICAL: cleanup on unmount
-    return () => {
-      es.close();
-      eventSourceRef.current = null;
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-    };
-  }, [analysisId]); // Only re-run if analysisId changes
-}
-```
-Key rules:
-1. Store `EventSource` in `useRef`, not `useState`.
-2. Always return a cleanup function from `useEffect` that calls `es.close()`.
-3. Clear any reconnection timeouts in the cleanup function.
-4. Send a `complete` event type from the server when the pipeline finishes so the client closes proactively.
-5. Do not put the `EventSource` creation in a function that's called on user interaction without tracking and closing previous connections.
-
-**Warning signs:**
-- Server-side worker count climbs over time even when users are idle
-- Multiple SSE connections visible in browser DevTools Network tab for the same analysis
-- Memory usage on the server grows steadily
-- "Max connections" errors in Redis or gunicorn
+**Prevention:**
+1. Always use `url=*.domain.com&matchType=domain` for domain presence checks
+2. Fetch the collection list once and cache it (changes monthly)
+3. Parse responses line-by-line: `[json.loads(line) for line in response.text.strip().split('\n') if line.strip()]`
+4. Use `limit=1` for presence checks (you only need to know if ANY page was crawled)
+5. Use `output=json` parameter explicitly -- default output is CDX text format, not JSON
 
 **Phase to address:**
-SSE frontend integration phase. Must be tested specifically with Inertia page navigation -- not just unmounting the component in isolation.
+CC step implementation. Write integration tests against the real API with known domains.
 
 ---
 
-## Technical Debt Patterns
+### Pitfall 5: Adding 3 New Steps Breaks SSE Progress UX
 
-| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|----------------|-----------------|
-| Polling instead of SSE | No ASGI server needed, simpler architecture | 2-second latency on progress, more server load from polling requests, worse UX | Acceptable for MVP if SSE architecture is too complex to add now. Easy to replace later since the progress-in-Redis pattern is the same. |
-| Single supervisor job instead of RQ dependency chains | Simpler error handling, sequential progress updates | One long-running job blocks a worker for entire pipeline duration (2-5 min); no parallelism between independent steps | Acceptable initially. Refactor to parallel steps (WAF + robots.txt simultaneously) when pipeline performance matters. |
-| Storing progress in `job.meta` instead of Redis hash | No extra Redis key management | `job.meta` requires `job.save_meta()` which does a full Redis write of the entire meta dict. Polling progress requires fetching the full job object. Cannot be read from the SSE service without importing RQ. | Never for SSE integration. Use a dedicated Redis hash from the start -- it is barely more code and far more flexible. |
-| Using `urllib.robotparser` instead of Protego | Zero dependencies, stdlib | No wildcard pattern support, buggy with malformed robots.txt, no crawl-delay support | Never. Protego is a small, well-maintained library that handles real-world robots.txt correctly. The stdlib parser will silently give wrong answers. |
-| Skipping `extruct` error handling, letting it crash | Faster implementation | Any malformed JSON-LD, missing schema, or trailing semicolon crashes the entire pipeline for that URL | Never. Extruct extraction must always be wrapped in try/except with graceful degradation to partial results. |
+**What goes wrong:**
+The existing pipeline has ~12 steps with SSE progress events. Adding 3 new steps (CC presence, Google News signals, frequency estimation) means:
+- The frontend progress indicators need updating (new step names, new step count)
+- The `prior` job result copying in `should_skip_publisher_steps` must include the new result fields, or cached results will show "Not checked" for the new signals
+- The freshness TTL skip logic must emit `"skipped"` events for the new steps, or the SSE stream will never send events for those steps and the frontend will show them as "pending" forever
+- Total pipeline duration increases, potentially exceeding the RQ `job_timeout` of 600 seconds
 
-## Integration Gotchas
+**Prevention:**
+1. **Update the `prior` results query in the supervisor** to include new result fields:
+```python
+# In supervisor.py, the .values() call for prior job copying:
+.values(
+    "waf_result", "tos_result", "robots_result",
+    "sitemap_result", "rss_result", "rsl_result",
+    "ai_bot_result", "metadata_result",
+    "cc_result", "google_news_result", "frequency_result",  # NEW
+)
+```
+2. **Add `"skipped"` events for all new steps** in the freshness TTL skip branch
+3. **Add new JSONField columns to ResolutionJob** with a migration, and new flat fields on Publisher
+4. **Position new steps wisely in the pipeline.** CC is an external API call -- place it after all local/fast steps. Frequency estimation depends on RSS data from `run_rss_step` -- place it after RSS. Google News signals reuse homepage HTML -- place it near other HTML-parsing steps.
+5. **Update the frontend step list** to include new step names and descriptions
+
+**Phase to address:**
+Pipeline integration phase. The supervisor changes, model migration, and frontend updates must all ship together.
+
+---
+
+### Pitfall 6: RSS Feed Parsing for Frequency Requires Actual Feed Fetching (New HTTP Requests)
+
+**What goes wrong:**
+The existing `run_rss_step` only discovers RSS feed URLs from homepage `<link>` tags. It does NOT fetch the feed content. Frequency estimation requires actually fetching and parsing the RSS XML to extract `<pubDate>` values. This means:
+- 1-3 additional HTTP requests per analysis (one per discovered feed)
+- Feeds may be behind the same WAF/CDN as the main site
+- Feed content may be large (some feeds include full article content, not just summaries)
+- Feed parsing needs a proper XML parser (not regex), adding a dependency
+
+**Prevention:**
+1. **Fetch only the first discovered RSS feed**, not all of them. Multiple feeds usually contain overlapping content.
+2. **Use `feedparser` library** for robust RSS/Atom parsing. It handles encoding issues, malformed XML, date format variations, and both RSS 2.0 and Atom formats. Do not write a custom XML parser.
+3. **Set a response size limit** when fetching feeds. Some feeds are 5MB+ with full article content. Use `httpx` with a streaming response and stop reading after 500KB:
+```python
+async with httpx.AsyncClient() as client:
+    async with client.stream("GET", feed_url, timeout=10) as response:
+        content = b""
+        async for chunk in response.aiter_bytes():
+            content += chunk
+            if len(content) > 500_000:  # 500KB limit
+                break
+```
+4. **Reuse the existing `FetchStrategyManager`** for feed fetching so WAF-blocked sites use the Zyte fallback automatically.
+
+**Phase to address:**
+Frequency estimation phase. The feed fetching step is a prerequisite for frequency estimation.
+
+---
+
+### Pitfall 7: CC Crawl Data Shows Domain Presence, Not Current State
+
+**What goes wrong:**
+Common Crawl data is 1-6 months old. A domain present in the CC-MAIN-2025-51 crawl (December 2025) was crawled in December, but the site may have changed since then. The CC presence data tells you "Common Crawl has crawled this domain at some point in the last N months" -- it does not tell you "Common Crawl can currently access this domain."
+
+This creates confusion when combined with real-time data from other steps. Example: the robots.txt step shows CCBot is blocked (real-time), but the CC presence step shows the domain IS in Common Crawl (from a crawl before the block was added). Users see contradictory information.
+
+**Prevention:**
+1. **Display the crawl date alongside CC presence data.** "Found in Common Crawl (December 2025 crawl)" is much more useful than "Found in Common Crawl: Yes."
+2. **Cross-reference with the `ai_bot_blocking` step.** If CCBot is currently blocked in robots.txt but the domain is in CC, note: "Domain was in Common Crawl as of [date], but CCBot is currently blocked -- future crawls may be affected."
+3. **Show multiple crawl timestamps if querying multiple collections.** This reveals trends: "Present in last 6 crawls" vs. "Present in 1 of last 6 crawls" tells a different story than just "present/not present."
+
+**Phase to address:**
+CC step UI/display phase. The cross-referencing logic should be in the frontend or in a synthesis step, not in the CC query step itself.
+
+---
+
+## Minor Pitfalls
+
+### Pitfall 8: `feedparser` Date Parsing Edge Cases
+
+**What goes wrong:**
+RSS `<pubDate>` formats vary wildly. RFC 822 is the standard but many feeds use ISO 8601, Unix timestamps, or malformed dates. `feedparser` handles most of these, but edge cases remain:
+- Dates without timezone (treated as UTC by some parsers, local time by others)
+- Dates in non-English locales ("15 Fev 2026")
+- Relative dates ("2 hours ago" -- yes, some feeds do this)
+
+**Prevention:**
+Use `feedparser`'s `published_parsed` attribute which returns a `time.struct_time`, then convert to datetime. For items where `published_parsed` is `None`, fall back to `updated_parsed`. Skip items with no parseable date rather than guessing.
+
+---
+
+### Pitfall 9: CC Index Returns Empty Results for New/Small Domains
+
+**What goes wrong:**
+Common Crawl does not crawl every domain. Small, new, or regional publishers may have zero presence in CC. Reporting "Not found in Common Crawl" for a small local news site is accurate but potentially alarming to users who do not understand CC's scope.
+
+**Prevention:**
+Frame CC absence as informational, not as a negative signal. "Not found in Common Crawl's most recent crawl. Common Crawl covers approximately 3 billion pages and may not include smaller or newer publishers." Avoid language like "Not indexed" which implies a problem.
+
+---
+
+### Pitfall 10: Google News Sitemap Detection Conflation
+
+**What goes wrong:**
+A publisher might have a `<sitemap>` entry in their sitemap index called `news-sitemap.xml` or `sitemap-news.xml`. This is a Google News sitemap (using the `<news:news>` XML namespace). The existing `run_sitemap_step` discovers these but does not distinguish them from regular sitemaps. If you use sitemap presence as a Google News signal, you need to actually check whether the sitemap uses the Google News XML namespace, not just match on the filename.
+
+**Prevention:**
+When checking for Google News sitemaps as a signal, fetch the first few KB of the sitemap and check for `xmlns:news="http://www.google.com/schemas/sitemap-news/0.9"` in the XML. A sitemap named "news-sitemap.xml" that uses the standard `<urlset>` namespace is just a regular sitemap for the /news/ section.
+
+---
+
+## Phase-Specific Warnings
+
+| Phase Topic | Likely Pitfall | Mitigation |
+|-------------|---------------|------------|
+| CC Index integration | API timeout stalls pipeline (Critical #1) | Non-critical step with 10s timeout, 7-day cache, latest crawl only |
+| CC Index integration | Wrong query format returns empty results (Moderate #4) | Use `*.domain.com` with `matchType=domain`, `output=json`, `limit=1` |
+| CC Index integration | Stale data contradicts real-time signals (Moderate #7) | Display crawl date, cross-reference with CCBot blocking status |
+| Google News detection | No reliable programmatic detection (Critical #2) | Use heuristic signals, not binary yes/no. Never scrape Google News. |
+| Google News detection | News sitemap filename vs. namespace conflation (Minor #10) | Check XML namespace, not filename pattern |
+| Frequency estimation | Sparse/misleading RSS data (Critical #3) | Report confidence levels, sample size, and data window alongside estimates |
+| Frequency estimation | RSS feed fetching adds latency (Moderate #6) | Fetch only first feed, 500KB limit, reuse FetchStrategyManager |
+| Frequency estimation | Sitemap `lastmod` unreliable (Critical #3) | Validate dates, discard if >80% same date, prefer RSS over sitemap |
+| Pipeline integration | New steps break SSE progress and caching (Moderate #5) | Update prior-job copying, add skip events, update frontend step list |
+| Pipeline integration | Total execution time exceeds RQ timeout | CC step timeout at 10s, frequency step timeout at 15s, monitor total time |
+
+## Integration Gotchas Specific to This Milestone
 
 | Integration | Common Mistake | Correct Approach |
 |-------------|----------------|------------------|
-| SSE + Inertia CSRF | SSE `EventSource` cannot send custom headers (no CSRF token). If the SSE endpoint is behind CSRF middleware, all connections fail with 403. | Exempt SSE views from CSRF using `@csrf_exempt` or use `CsrfViewMiddleware` exclusion. SSE is GET-only and read-only, so CSRF protection is not needed. |
-| RQ + Django ORM | RQ worker runs in a separate process. If you pass Django model instances as job arguments, they become stale -- the worker has a different database connection and may see outdated data. | Pass IDs (integers) as job arguments, not model instances. Re-fetch from the database inside the job function. |
-| RQ + Django settings | RQ worker process does not automatically load Django settings. Importing models or using ORM in job functions fails with `django.core.exceptions.ImproperlyConfigured`. | Use `django-rq` which handles Django setup, or call `django.setup()` in worker initialization. Configure via `RQ_QUEUES` in Django settings. |
-| curl-cffi + Zyte fallback | Using different HTTP clients for primary vs. fallback means different cookie handling, redirect behavior, timeout semantics, and error types. Error handling code assumes one response format. | Define a `FetchResult` dataclass that both fetchers return. Normalize errors to a common exception type. Test the fallback path explicitly -- it will have different failure modes. |
-| curl-cffi TLS impersonation + target site | Choosing wrong browser impersonation profile. Some CDNs/WAFs fingerprint specific browser versions and block outdated ones. Using `impersonate="chrome110"` when the site expects Chrome 120+ JA3 fingerprint. | Use recent browser versions: `impersonate="chrome"` (latest), not a specific version. Rotate impersonation profiles if you hit blocks. Check curl-cffi release notes for supported browser versions. |
-| Redis + Django `runserver` | Django dev server is single-threaded. If an SSE view blocks waiting for Redis pub/sub, the entire dev server hangs. No other requests can be served. | In development, use polling or a separate process for SSE. Or use `runserver --nothreading=False` (Django 4.1+) to enable threading. Better: use uvicorn for dev when SSE routes exist. |
-| extruct + Zyte-fetched HTML | Zyte returns base64-encoded HTTP response body, decoded as UTF-8. Some pages return Shift_JIS, ISO-8859-1, or other encodings. The current `b64decode(...).decode("utf-8")` will throw `UnicodeDecodeError` on non-UTF-8 pages. | Use `chardet` or `charset-normalizer` to detect encoding, or use Zyte's `browserHtml` option which always returns UTF-8. Wrap decode in try/except with fallback to `latin-1`. |
-| SSE + nginx (production) | nginx's default `proxy_buffering on` buffers the entire response before forwarding to the client. SSE events do not reach the browser until the connection closes. | Add `X-Accel-Buffering: no` header on SSE responses, or set `proxy_buffering off` in the nginx location block for SSE routes. Also set `proxy_read_timeout` high enough for the analysis duration. |
-
-## Performance Traps
-
-| Trap | Symptoms | Prevention | When It Breaks |
-|------|----------|------------|----------------|
-| Opening a new curl-cffi `Session` per request instead of reusing | Works fine for 1-10 requests, then connection establishment adds 200-500ms per fetch and TLS handshakes pile up | Create one `Session` per worker process (module-level or singleton). Reuse across requests. `Session` handles connection pooling internally. | > 50 concurrent analyses. Each new session = new TCP + TLS handshake. |
-| SSE endpoint doing database queries to check progress | Each SSE poll iteration queries PostgreSQL for job status. Under load, this creates sustained query pressure on the database. | Store progress in Redis (fast, in-memory). SSE endpoint reads only from Redis, never from PostgreSQL. Database is written to only when pipeline steps complete. | > 20 concurrent SSE connections polling at 1-second intervals = 20 QPS sustained on PostgreSQL just for status checks. |
-| Not setting `maxmemory` on Redis in Docker | Redis grows unbounded. Analysis progress keys, RQ job data, and failed job registries accumulate. Eventually Redis uses all available container memory and starts OOM-killing or swapping. | Set `maxmemory 256mb` (or appropriate limit) with `maxmemory-policy allkeys-lru`. Set TTL on all progress keys (e.g., 1 hour). Clean up completed analysis keys after the SSE stream closes. | After hundreds of analyses without cleanup, or if a bug causes keys to never expire. |
-| Synchronous LLM calls in the RQ worker blocking on API latency | LLM publisher resolution takes 2-10 seconds per call. The worker is blocked during this time, unable to process other jobs. With 1-2 workers, this creates a bottleneck. | Use pydantic-ai's async support if running in an async context, or ensure enough RQ workers to handle concurrent LLM calls. Consider a dedicated queue for LLM tasks with its own worker pool. | > 5 concurrent analyses, each making 1-2 LLM calls. Workers spend most of their time waiting on API responses. |
-
-## Security Mistakes
-
-| Mistake | Risk | Prevention |
-|---------|------|------------|
-| SSE endpoint returns analysis data without authentication check | Any user can watch any analysis progress by guessing the analysis ID. Could leak publisher intelligence data. | SSE endpoint must verify the requesting user owns the analysis. Use session authentication (cookies are sent with EventSource automatically). Generate analysis IDs as UUIDs, not sequential integers. |
-| Passing user-supplied URLs directly to curl-cffi without validation | SSRF (Server-Side Request Forgery). User submits `http://169.254.169.254/latest/meta-data/` and the server fetches AWS metadata. Or `http://localhost:6379/` to probe internal Redis. | Validate URL scheme (only `http`/`https`), resolve hostname to IP and reject private/internal ranges (10.x, 172.16-31.x, 192.168.x, 127.x, 169.254.x, ::1). Use `ipaddress` module for range checking. |
-| Storing raw LLM responses without sanitization | LLM might return unexpected content (hallucinated HTML, markdown injection, or XSS payloads) that gets rendered in the React frontend. | Treat all LLM output as untrusted. Use Pydantic models to validate structure. React's JSX auto-escapes by default, but avoid `dangerouslySetInnerHTML` with LLM output. Validate publisher names against a reasonable character set. |
-| Redis connection string with password exposed in Docker logs | Docker compose `command: redis-server --requirepass mypassword` appears in `docker-compose.yml` and process listing. | Use environment variables for Redis password. Store in `.env` file (already gitignored). Use `REDIS_URL` connection string pattern. |
-
-## UX Pitfalls
-
-| Pitfall | User Impact | Better Approach |
-|---------|-------------|-----------------|
-| Progress bar shows percentage but no context | User sees "45%" but has no idea what is happening. Feels slow and opaque. | Show step names with status: "Checking robots.txt... done", "Fetching page... in progress", "Extracting metadata... waiting". Progress bar + step list. |
-| SSE connection fails silently | User stares at spinner forever. No error message, no retry indication. | Implement client-side reconnection with exponential backoff (1s, 2s, 4s, max 30s). After 3 failures, show "Connection lost. Retrying..." message. After max retries, show error with manual retry button. |
-| Analysis fails mid-pipeline, only shows "Error" | User has no idea what went wrong or whether partial results were saved. They do not know if retrying will help. | Show which step failed and why: "Page fetch failed: site returned 403 Forbidden. WAF detection and robots.txt results are still available." Partial results should be visible and saved. |
-| Starting duplicate analyses for the same URL | User clicks "Analyze" twice, or submits the same URL from different tabs. Two pipelines run simultaneously, racing to create/update the same publisher. | Check for in-progress analyses for the same normalized URL before starting a new one. Show existing in-progress analysis if one exists. Use a Redis lock keyed by normalized URL. |
-
-## "Looks Done But Isn't" Checklist
-
-- [ ] **SSE streaming:** Works in dev with `runserver` but SSE events batch in production behind nginx -- verify `X-Accel-Buffering: no` header is set and nginx config has `proxy_buffering off` for SSE routes
-- [ ] **RQ pipeline:** Happy path works but failure handling is untested -- verify that a failure at each individual step produces a visible error in the SSE stream and does not leave the pipeline stuck
-- [ ] **robots.txt:** Parses clean robots.txt but not malformed ones -- verify with real-world robots.txt from sites like facebook.com (empty), bloomberg.com (wildcard patterns), and a site returning 403 for robots.txt
-- [ ] **URL normalization:** Works for common URLs but not edge cases -- verify with IDN domains, URLs with port numbers, URLs with authentication credentials, URLs with fragments, and uppercase hostnames
-- [ ] **Publisher resolution:** LLM returns a name for common domains but hallucinates for obscure ones -- verify with subdomains (blog.example.com vs example.com), CDN domains (d1234.cloudfront.net), and URL shorteners (bit.ly/abc)
-- [ ] **extruct extraction:** Works on pages with clean schema.org markup but crashes on malformed JSON-LD -- verify with pages that have: no structured data, malformed JSON in script tags, multiple conflicting schemas, and HTML entities in JSON-LD
-- [ ] **SSE cleanup:** Works when user stays on the page but leaks connections on navigation -- verify by starting an analysis, navigating away with Inertia, and checking server-side connection count
-- [ ] **Redis progress keys:** Written during analysis but never cleaned up -- verify TTL is set on all keys and completed analysis keys are deleted after the SSE stream closes
-- [ ] **curl-cffi fallback to Zyte:** Primary fetcher works but fallback path is untested -- verify by making curl-cffi fail (block a domain) and confirming Zyte fallback activates and returns the same `FetchResult` format
+| CC step + existing pipeline | Adding CC as a blocking step between robots and sitemap steps | Place CC step after all critical steps. If it fails, all other results are still saved. |
+| CC step + freshness TTL | Using the same 24-hour publisher freshness TTL for CC data that changes monthly | Use a separate CC cache TTL (7 days) stored on the Publisher model or in Redis |
+| Frequency step + RSS step | Re-discovering RSS feeds in the frequency step | Pass `rss_result["feeds"]` from the existing RSS step into the frequency step. Fetch feed content in the frequency step only. |
+| Frequency step + sitemap step | Fetching all sub-sitemaps to count URLs | Only fetch the sitemap index, count `<sitemap>` entries, estimate total URLs from sub-sitemap count |
+| Google News signals + publisher details | Running a separate HTML parse for Google News meta tags | Reuse `homepage_html` already fetched. Add signal extraction to the existing HTML parsing flow. |
+| New result fields + prior job copying | Forgetting to add new fields to the `prior` result copying `.values()` query | Add `cc_result`, `google_news_result`, `frequency_result` to both the `.values()` list and the field assignment block |
+| New result fields + ResolutionJob model | Adding JSONField columns without a default | Use `null=True, blank=True` like existing result fields. Run migration before deploying new pipeline code. |
 
 ## Recovery Strategies
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| Duplicate publishers from poor normalization | MEDIUM | Write a migration script that normalizes all publisher URLs, merges duplicates (keeping the one with most data), and re-points WAFReport/TermsDiscovery foreign keys. Run once, add unique constraint. |
-| Zombie SSE connections exhausting workers | LOW | Restart gunicorn/uvicorn workers. Add connection timeout on server side (close SSE after max duration). Fix cleanup code in React component. |
-| Orphaned RQ jobs in DeferredJobRegistry | LOW | Use `rq` CLI: `rq requeue --all -q default`. Add monitoring for deferred job count. Fix dependency chain to use `allow_failure=True`. |
-| curl-cffi segfault crashing workers | HIGH | Audit all curl-cffi usage for `stream=True`. Replace with non-streaming calls. Add process-level monitoring to auto-restart crashed workers (supervisord or Docker restart policy). |
-| Redis OOM from progress key accumulation | LOW | Flush expired keys with `redis-cli --scan --pattern "analysis:*"`. Add TTL to all keys. Set `maxmemory-policy allkeys-lru`. |
-| LLM hallucinating publisher names | LOW | Add manual override UI for publisher names. Store LLM confidence score. Flag low-confidence results for human review. Compare against existing publisher database before creating new records. |
+| CC API rate limited / IP blocked | LOW | Wait 24 hours. Implement caching to prevent recurrence. Consider using CC's columnar index via Athena for bulk queries. |
+| Google News detection giving false results | LOW | Reframe as "signals" in UI. No data correction needed since signals are honestly presented as heuristic. |
+| Frequency estimates wildly wrong | LOW | Add confidence levels to UI. Re-run frequency estimation with fixed parsing logic. Old estimates can be overwritten on next analysis. |
+| New steps breaking SSE progress | MEDIUM | Frontend fix to handle unknown step names gracefully (ignore, don't crash). Backend fix to add missing skip events. |
+| Pipeline timeout from added steps | LOW | Increase RQ `job_timeout` from 600 to 900 seconds. Add per-step timeouts (CC: 10s, feed fetch: 10s). |
+| Stale CC data confusing users | LOW | Add "as of [date]" to CC presence display. No data fix needed. |
 
-## Pitfall-to-Phase Mapping
+## "Looks Done But Isn't" Checklist
 
-| Pitfall | Prevention Phase | Verification |
-|---------|------------------|--------------|
-| Inertia middleware interfering with SSE (Critical #1) | Infrastructure (SSE endpoint setup) | Single SSE event streams to browser immediately, not batched |
-| WSGI worker exhaustion (Critical #2) | Infrastructure (server architecture) | 5 concurrent SSE connections do not block normal page loads |
-| RQ dependent job abandonment (Critical #3) | Task pipeline (job chain design) | Intentionally fail each pipeline step; verify error appears in SSE stream within 5 seconds |
-| curl-cffi streaming crash (Critical #4) | Page fetching (fetcher implementation) | Fetch 10 slow/chunked-response URLs; zero worker crashes |
-| URL normalization duplicates (Critical #5) | URL normalization (first pipeline step) | Submit `http://WWW.Example.Com:80/` and `https://example.com` -- same publisher record created |
-| SSE cleanup on unmount (Critical #6) | SSE frontend (React component) | Start analysis, navigate away via Inertia, verify server connection count drops to 0 |
-| robots.txt malformed parsing | Pipeline step (robots.txt check) | Parse robots.txt from 20 real-world sites including known edge cases (empty, 403, wildcards) |
-| extruct crash on malformed JSON-LD | Pipeline step (metadata extraction) | Run extruct on 20 real-world pages; zero unhandled exceptions |
-| LLM publisher hallucination | Pipeline step (publisher resolution) | Test with 10 ambiguous domains (CDN, subdomains, URL shorteners); all return "unknown" or correct name, never fabricated names |
-| Redis memory unbounded growth | Infrastructure (Redis setup) | Run 100 analyses; verify Redis memory stays under `maxmemory` limit; all progress keys have TTL |
-| SSE CORS / nginx buffering | Infrastructure (deployment config) | SSE works end-to-end through nginx reverse proxy in staging |
+- [ ] **CC Index query:** Works for `nytimes.com` but fails for domains with subdomains only (no `www.` prefix match). Test with `*.domain.com` wildcard.
+- [ ] **CC Index caching:** Query works but hits the API on every analysis, even for the same domain within minutes. Verify caching layer actually prevents duplicate API calls.
+- [ ] **Google News signals:** Detects signals on news sites but also fires for blog sites with `news_keywords` meta tags they copied from a template. Verify signal weighting produces reasonable "likelihood" values.
+- [ ] **Frequency estimation:** Returns a number but it is based on 3 RSS items spanning 2 hours, extrapolated to a daily rate. Verify confidence level correctly reflects sample quality.
+- [ ] **Frequency estimation:** Works on RSS 2.0 feeds but crashes on Atom feeds or RSS 1.0. Verify `feedparser` handles all three formats.
+- [ ] **Prior job copying:** New fields added to model and supervisor, but the freshness TTL skip branch does not emit `"skipped"` events for new steps. Frontend shows new steps stuck at "pending" for cached analyses.
+- [ ] **Pipeline timeout:** Individual steps have timeouts but total pipeline time is not monitored. Adding 3 steps that each take their maximum timeout (10s + 10s + 15s) adds 35 seconds worst case. Verify RQ `job_timeout` accommodates this.
+- [ ] **RSS feed fetch:** Uses `_fetch_manager.fetch()` which falls back to Zyte for blocked sites. Verify Zyte credits are not burned on RSS feed fetches (feeds are rarely WAF-blocked; a direct `httpx.get()` is usually sufficient and cheaper).
 
 ## Sources
 
-- [Django ticket #36655: GZipMiddleware buffers streaming responses](https://code.djangoproject.com/ticket/36655) -- HIGH confidence
-- [Django ticket #36656: GZipMiddleware drops async streaming content](https://code.djangoproject.com/ticket/36656) -- HIGH confidence
-- [gunicorn worker timeout with streaming (issue #1186)](https://github.com/benoitc/gunicorn/issues/1186) -- HIGH confidence
-- [Django StreamingHttpResponse blog (Anze Pecar)](https://blog.pecar.me/django-streaming-responses) -- MEDIUM confidence
-- [RQ Dependency class and allow_failure (issue #2006)](https://github.com/rq/rq/issues/2006) -- HIGH confidence
-- [RQ dependent job failure handling (issue #1224)](https://github.com/rq/rq/issues/1224) -- HIGH confidence
-- [RQ job chaining (issue #1503)](https://github.com/rq/rq/issues/1503) -- HIGH confidence
-- [curl-cffi crash on session close during streaming (issue #675)](https://github.com/lexiforest/curl_cffi/issues/675) -- HIGH confidence
-- [curl-cffi timeout issues in stream mode (issue #215)](https://github.com/lexiforest/curl_cffi/issues/215) -- HIGH confidence
-- [curl-cffi documentation: quick start](https://curl-cffi.readthedocs.io/en/latest/quick_start.html) -- HIGH confidence
-- [extruct: Accept JSON parsing errors in JSON-LD (issue #45)](https://github.com/scrapinghub/extruct/issues/45) -- HIGH confidence
-- [extruct: Handle badly formatted JSON-LD (issue #87)](https://github.com/scrapinghub/extruct/issues/87) -- HIGH confidence
-- [Protego robots.txt parser (GitHub)](https://github.com/scrapy/protego) -- HIGH confidence
-- [Python robotparser crawl-delay bug (cpython issue #60303)](https://github.com/python/cpython/issues/60303) -- HIGH confidence
-- [url-normalize library (GitHub)](https://github.com/niksite/url-normalize) -- MEDIUM confidence
-- [React SSE implementation guide (OneUpTime)](https://oneuptime.com/blog/post/2026-01-15-server-sent-events-sse-react/view) -- MEDIUM confidence
-- [SSE practical guide (Tiger Abrodi)](https://tigerabrodi.blog/server-sent-events-a-practical-guide-for-the-real-world) -- MEDIUM confidence
-- [MDN: Using server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events) -- HIGH confidence
-- [Redis memory limits in Docker Compose (Peter Kellner)](https://peterkellner.net/2023/09/24/Managing-Redis-Memory-Limits-with-Docker-Compose/) -- MEDIUM confidence
-- [Browser SSE connection limit (6 per domain over HTTP/1.1)](https://blog.pranshu-raj.me/posts/exploring-sse/) -- MEDIUM confidence
-- [Inertia middleware source code (inertia-django)](https://github.com/inertiajs/inertia-django) -- HIGH confidence (verified against installed package)
+- [Common Crawl Index Server documentation](https://index.commoncrawl.org) -- HIGH confidence
+- [Common Crawl FAQ: rate limiting and usage guidelines](https://commoncrawl.org/faq) -- HIGH confidence
+- [Common Crawl blog: Oct/Nov 2023 performance issues](https://commoncrawl.org/blog/oct-nov-2023-performance-issues) -- HIGH confidence (describes 503 issues and rate limiting deployment)
+- [Common Crawl community: Overloading index.commoncrawl.org](https://groups.google.com/g/common-crawl/c/3QmQjFA_3y4) -- MEDIUM confidence
+- [Common Crawl community: 503 problem](https://groups.google.com/g/common-crawl/c/kEHzXZNu5To) -- MEDIUM confidence
+- [Common Crawl CDXJ Index documentation](https://commoncrawl.org/cdxj-index) -- HIGH confidence
+- [ikreymer/cdx-index-client (GitHub)](https://github.com/ikreymer/cdx-index-client) -- MEDIUM confidence
+- [Google News inclusion FAQ (Publisher Center Community)](https://support.google.com/news/publisher-center/thread/71702189) -- MEDIUM confidence
+- [Google: Answers to common questions about appearing in Google News](https://developers.google.com/search/blog/2021/07/google-news-top-questions) -- HIGH confidence
+- [Google: Best practices for XML sitemaps and RSS/Atom feeds](https://developers.google.com/search/blog/2014/10/best-practices-for-xml-sitemaps-rssatom) -- HIGH confidence
+- [sitemaps.org protocol specification](https://www.sitemaps.org/protocol.html) -- HIGH confidence
+- [Skeptric: Searching 100 Billion Webpages with Capture Index](https://skeptric.com/searching-100b-pages-cdx/) -- MEDIUM confidence
 
 ---
-*Pitfalls research for: URL analysis workflow addition to Django-Inertia app*
-*Researched: 2026-02-13*
+*Pitfalls research for: Competitive intelligence features (Common Crawl, Google News, frequency estimation)*
+*Researched: 2026-02-17*

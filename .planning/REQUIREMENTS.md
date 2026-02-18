@@ -1,0 +1,103 @@
+# Requirements: itsascout v2.1
+
+**Defined:** 2026-02-17
+**Core Value:** Paste a URL, get a comprehensive scraping report card with real-time progress as each check completes.
+**Milestone:** v2.1 Competitive Intelligence
+
+## v2.1 Requirements
+
+Requirements for this milestone. Each maps to roadmap phases.
+
+### Common Crawl
+
+- [ ] **CC-01**: Report card shows whether the publisher's domain appears in Common Crawl index
+- [ ] **CC-02**: CC presence check queries the CDX Index API with domain wildcard match
+- [ ] **CC-03**: CC step is non-critical — API failures produce "data unavailable" not pipeline failure
+- [ ] **CC-04**: CC result includes page count and latest crawl date when available
+
+### Google News Signals
+
+- [ ] **GN-01**: Report card shows Google News readiness signals (not binary "included/not included")
+- [ ] **GN-02**: Detect news sitemap presence via `xmlns:news` XML namespace in discovered sitemaps
+- [ ] **GN-03**: Detect NewsArticle / NewsMediaOrganization schema types from existing structured data
+- [ ] **GN-04**: Aggregate signals into readiness level (strong / moderate / minimal / none)
+
+### Update Frequency
+
+- [ ] **UF-01**: Report card shows estimated publishing frequency (e.g., "~3 articles/day")
+- [ ] **UF-02**: Primary estimation from RSS feed publication dates via feedparser
+- [ ] **UF-03**: Fallback estimation from sitemap lastmod dates when RSS unavailable
+- [ ] **UF-04**: Frequency estimate includes confidence indicator (high/medium/low based on sample size)
+
+### Pipeline Integration
+
+- [ ] **PIPE-01**: New steps integrate into existing sequential pipeline with SSE progress events
+- [ ] **PIPE-02**: New model fields on Publisher (flat) and ResolutionJob (JSON) follow existing patterns
+- [ ] **PIPE-03**: Publisher freshness TTL skip path copies new fields correctly for cached results
+- [ ] **PIPE-04**: New steps appear in SSE progress stream with proper step names
+
+### Report Card UI
+
+- [ ] **UI-01**: Competitive Intelligence section in report card displays all three signals
+- [ ] **UI-02**: CC presence shows page count and crawl date when available, graceful "unavailable" otherwise
+- [ ] **UI-03**: Google News readiness shows signal breakdown with readiness level badge
+- [ ] **UI-04**: Update frequency shows estimated rate with confidence indicator
+
+## Deferred
+
+Tracked but not in v2.1 scope.
+
+### Authentication
+
+- **AUTH-01**: User can sign up and log in with Django built-in auth
+- **AUTH-02**: Report card pages can be private to authenticated users
+
+### Extended Intelligence
+
+- **EXT-01**: CCBot blocking correlation (robots.txt disallow for CCBot vs CC presence)
+- **EXT-02**: Historical CC crawl trend (multiple crawl snapshots over time)
+- **EXT-03**: Competitor comparison (side-by-side intelligence for multiple publishers)
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| Google News Publisher Center API | Requires publisher authentication, not available to third parties |
+| Full sitemap crawling | Discover and sample sitemaps only — full crawl is out of scope |
+| Full RSS feed content parsing | Only extract dates for frequency — content parsing is separate concern |
+| Real-time CC API monitoring | Single point-in-time check per analysis, not ongoing monitoring |
+| Batch/bulk competitive analysis | Single-URL flow first, batch later |
+
+## Traceability
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| CC-01 | Phase 14 | Pending |
+| CC-02 | Phase 14 | Pending |
+| CC-03 | Phase 14 | Pending |
+| CC-04 | Phase 14 | Pending |
+| GN-01 | Phase 16 | Pending |
+| GN-02 | Phase 15 | Pending |
+| GN-03 | Phase 16 | Pending |
+| GN-04 | Phase 16 | Pending |
+| UF-01 | Phase 15 | Pending |
+| UF-02 | Phase 15 | Pending |
+| UF-03 | Phase 15 | Pending |
+| UF-04 | Phase 15 | Pending |
+| PIPE-01 | Phase 17 | Pending |
+| PIPE-02 | Phase 13 | Pending |
+| PIPE-03 | Phase 17 | Pending |
+| PIPE-04 | Phase 17 | Pending |
+| UI-01 | Phase 18 | Pending |
+| UI-02 | Phase 18 | Pending |
+| UI-03 | Phase 18 | Pending |
+| UI-04 | Phase 18 | Pending |
+
+**Coverage:**
+- v2.1 requirements: 20 total
+- Mapped to phases: 20
+- Unmapped: 0
+
+---
+*Requirements defined: 2026-02-17*
+*Last updated: 2026-02-17 after roadmap phase mapping*

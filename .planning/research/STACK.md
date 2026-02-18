@@ -1,437 +1,318 @@
-# Technology Stack: v2.0 URL Analysis Workflow
+# Technology Stack: Competitive Intelligence Features
 
 **Project:** itsascout (scrapegrape)
-**Researched:** 2026-02-13
-**Scope:** NEW stack additions for single-URL analysis with streaming progress, metadata extraction, and publisher report card
+**Researched:** 2026-02-17
+**Scope:** NEW stack additions for Common Crawl presence checking, Google News inclusion detection, and publisher update frequency estimation
 
-## Context: Existing Stack (validated in v1.0 -- DO NOT change)
+## Context: Existing Stack (DO NOT change)
 
-- Django 5.2 + DRF + Inertia.js 1.2 + React 19.1 + Vite + TailwindCSS
-- PostgreSQL 17 via `dj-database-url`
-- `pydantic-ai-slim[openai]` for LLM tasks (GPT-4.1-nano)
-- `wafw00f` for WAF detection
-- `requests` for Zyte proxy API calls
-- `django_tasks` with DatabaseBackend for async tasks
-- `httpx` (in dependencies)
-- `loguru` + `logfire` for logging/observability
-- WSGI deployment (`WSGI_APPLICATION` in settings)
+Already in place and validated:
+
+- Django 5.2 + DRF + Inertia.js + React 19.1 + Vite + TailwindCSS
+- RQ for task queue, Redis for queue + SSE pub/sub
+- curl-cffi + Zyte for fetching (FetchStrategyManager)
+- protego for robots.txt parsing
+- extruct for structured data extraction (JSON-LD, OpenGraph, Microdata)
+- pydantic-ai with GPT-4.1-nano for LLM steps
+- polars (in deps, not yet used in app code)
+- httpx (in deps)
+- lxml (transitive via extruct)
+- w3lib (in deps)
+
+**Already handled by existing pipeline steps:**
+- Sitemap URL discovery (from robots.txt Sitemap: directives + common path probing)
+- RSS feed URL discovery (from homepage HTML `<link>` tags)
+- NewsArticle schema.org type detection (extruct already extracts JSON-LD with `ARTICLE_TYPES` including `NewsArticle`)
+- Homepage HTML fetching (reusable for new steps)
 
 ---
 
 ## Recommended Stack Additions
 
-### 1. HTTP Client: curl-cffi (Primary Fetcher) + Zyte (Fallback)
+### 1. Common Crawl Index: Direct HTTP API (NO new library needed)
 
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
-| curl-cffi | >=0.14.0 | Primary HTTP client with browser TLS fingerprinting | Bypasses bot detection via JA3/TLS impersonation; 20-30% faster than httpx; async support; HTTP/2 and HTTP/3; reduces Zyte API costs |
+| httpx (existing) | >=0.28.1 | Query CC CDX API at index.commoncrawl.org | Already in deps; CC Index API is a simple HTTP JSON endpoint; no library overhead needed |
 
-**Why curl-cffi over httpx or requests:**
+**Why NOT cdx-toolkit:**
 
-Publisher websites block automated HTTP clients via TLS fingerprinting. Neither `requests` nor `httpx` (both already in deps) can impersonate real browser TLS signatures. curl-cffi impersonates Chrome/Safari TLS fingerprints, achieving 15x higher evasion rates. This makes it the correct primary client for fetching arbitrary publisher pages without needing a proxy.
+cdx-toolkit (v0.9.38, Nov 2025) is the official Common Crawl Python client. However, it is overkill for our use case. We need exactly one thing: "does this domain appear in Common Crawl?" cdx-toolkit pulls in additional dependencies, implements WARC extraction, multi-index stitching, and pagination abstractions we do not need. The CC Index API is a single HTTP GET that returns JSON.
 
-**Fetching strategy:** curl-cffi with `impersonate="chrome"` as first attempt. Fall back to existing Zyte proxy API (via `requests` in `ingestion/services.py`) only when curl-cffi gets a 403, captcha, or Cloudflare challenge. This significantly reduces Zyte API cost per analysis.
+**How the CC Index API works:**
 
-**Integration note:** curl-cffi requires C libraries (bundled in the PyPI wheel). The project Dockerfile uses `python:3.12-slim` -- the manylinux wheel should install cleanly via `uv sync`. No additional apt packages expected, but verify during Docker build.
-
-**What NOT to do:** Do not replace `requests` in the existing Zyte `fetch_html_via_proxy()` function. Zyte does not need TLS impersonation. Keep `requests` for Zyte, use curl-cffi only for direct publisher fetching.
-
-```python
-# Sync usage
-from curl_cffi.requests import Session
-
-with Session(impersonate="chrome") as s:
-    response = s.get(url, timeout=15)
-
-# Async usage
-from curl_cffi.requests import AsyncSession
-
-async with AsyncSession(impersonate="chrome") as s:
-    response = await s.get(url, timeout=15)
+```
+GET https://index.commoncrawl.org/CC-MAIN-2025-51-index?url=*.example.com&output=json&showNumPages=true
 ```
 
-**Confidence:** HIGH -- v0.14.0 current on PyPI, actively maintained, Python 3.10+ required (project uses 3.12).
+Returns: `{"pages": 5, "pageSize": 5, "blocks": 25}` -- if pages > 0, the domain is in Common Crawl.
 
-### 2. Task Queue: django-rq + Redis (replacing django_tasks for new pipeline)
-
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| django-rq | >=3.0 | Django integration for RQ task queue | Simpler than Celery; built-in admin panel; management command workers; worker pool support; job status + meta tracking |
-| rq | >=2.6.1 | Redis-backed job queue (pulled in by django-rq) | Lightweight; worker pool; job.meta for progress reporting |
-| redis (Python client) | >=5.0 | Redis client library (pulled in by rq) | Required by rq |
-| Redis (server) | 7.x (Docker image: redis:7-alpine) | Message broker | Single infrastructure addition; also usable as Django cache later |
-
-**Why django-rq over Celery:**
-
-Celery is overkill. It requires complex configuration (beat, flower, result backends, serializers), supports multiple brokers we do not need (RabbitMQ), and has a steep learning curve. The v2.0 pipeline processes one URL at a time through ~10 sequential steps. RQ's simplicity wins decisively.
-
-**Why django-rq over the existing django_tasks DatabaseBackend:**
-
-The current `django_tasks` with `DatabaseBackend` has critical limitations:
-- No real worker process (polls the database)
-- No job status tracking or progress reporting
-- No retry logic
-- No `job.meta` dict for storing pipeline step progress
-
-The v2.0 pipeline needs real background workers that report per-step progress back to the frontend via SSE. RQ's `job.meta` dict is the mechanism: the worker updates `job.meta` with current step info, and the SSE endpoint reads it.
-
-**Key django-rq 3.0+ features:**
-- `python manage.py rqworker default` -- workers via Django management command
-- `python manage.py rqworker-pool default --num-workers 2` -- worker pool
-- Default `on_db_commit` mode -- jobs enqueue after DB transaction commits (safe with Django ORM)
-- Built-in Django admin integration at `/admin/django-rq/`
-- `job.get_status()` returns: queued, started, finished, failed, stopped
-- `job.meta` dict persists arbitrary data (pipeline progress)
-
-**Migration strategy:** Keep `django_tasks` for existing bulk ingestion. Use django-rq exclusively for the new v2.0 single-URL analysis pipeline. Migrate bulk ingestion to django-rq in a future milestone.
-
-```python
-# Enqueueing a job
-import django_rq
-
-queue = django_rq.get_queue("default")
-job = queue.enqueue(analyze_single_url, url)
-# job.id is the identifier for SSE progress tracking
-
-# Inside the worker task -- updating progress
-from rq import get_current_job
-
-def analyze_single_url(url: str):
-    job = get_current_job()
-    job.meta["step"] = "fetching_html"
-    job.meta["progress"] = 1
-    job.meta["total_steps"] = 10
-    job.save_meta()
-
-    html = fetch_with_curl_cffi(url)
-
-    job.meta["step"] = "extracting_metadata"
-    job.meta["progress"] = 2
-    job.save_meta()
-    # ... etc
+For richer data (capture count, status codes, timestamps):
+```
+GET https://index.commoncrawl.org/CC-MAIN-2025-51-index?url=*.example.com&output=json&limit=10
 ```
 
-**Confidence:** HIGH -- django-rq 3.0+ supports Django 5.x, RQ 2.0+. Well-documented pattern.
+Returns NDJSON lines with `url`, `status`, `timestamp`, `mime`, `length` per capture.
 
-### 3. Server-Sent Events: Django StreamingHttpResponse + Native EventSource
-
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| Django StreamingHttpResponse | (built-in Django) | SSE endpoint for pipeline progress | No additional dependency needed; native streaming |
-| EventSource API | (built-in browser) | Client-side SSE consumption | All modern browsers; automatic reconnection; zero npm packages needed |
-
-**Why no django-eventstream, no WebSockets, no third-party library:**
-
-The SSE use case is simple: one client watches one job progress through ~10 pipeline steps for 30-60 seconds. This does not need django-eventstream's channel abstraction, WebSocket bidirectionality, or ASGI migration.
-
-**How SSE works alongside Inertia.js:**
-
-SSE endpoints BYPASS Inertia entirely. They are separate Django URL routes that return `StreamingHttpResponse` (not Inertia page responses). The React frontend opens an `EventSource` connection to the SSE endpoint alongside the Inertia-rendered page.
+**Implementation approach:**
 
 ```python
-# urls.py -- SSE endpoint is a plain Django view, NOT an Inertia route
-urlpatterns = [
-    # Inertia routes (existing)
-    path("", publishers.views.table, name="table"),
-    # SSE route (new, separate)
-    path("api/analysis/<str:job_id>/progress", analysis_views.progress_stream, name="analysis-progress"),
-]
-```
+import httpx
 
-```python
-# Django SSE view
-from django.http import StreamingHttpResponse
-import django_rq, json, time
+CC_INDEX_URL = "https://index.commoncrawl.org"
+CC_LATEST_CRAWL = "CC-MAIN-2025-51"  # Update periodically or fetch from collinfo.json
 
-def progress_stream(request, job_id):
-    def event_stream():
-        queue = django_rq.get_queue("default")
-        while True:
-            job = queue.fetch_job(job_id)
-            if job is None:
-                yield f"data: {json.dumps({'error': 'Job not found'})}\n\n"
-                return
-            status = job.get_status()
-            meta = job.meta or {}
-            yield f"data: {json.dumps({'status': status, **meta})}\n\n"
-            if status in ("finished", "failed"):
-                return
-            time.sleep(1)
+def check_cc_presence(domain: str) -> dict:
+    """Check if domain appears in Common Crawl's latest index."""
+    # Step 1: Quick page count check
+    resp = httpx.get(
+        f"{CC_INDEX_URL}/{CC_LATEST_CRAWL}-index",
+        params={"url": f"*.{domain}", "output": "json", "showNumPages": "true"},
+        timeout=30,
+    )
+    if resp.status_code == 404:
+        return {"in_common_crawl": False, "captures": 0}
 
-    response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
-    response["Cache-Control"] = "no-cache"
-    response["X-Accel-Buffering"] = "no"  # Disable nginx buffering if fronted by nginx
-    return response
-```
+    data = resp.json()
+    page_count = data.get("pages", 0)
 
-```typescript
-// React hook (inside Inertia page component)
-useEffect(() => {
-  const source = new EventSource(`/api/analysis/${jobId}/progress`);
-  source.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    setProgress(data);
-    if (data.status === "finished" || data.status === "failed") {
-      source.close();
+    if page_count == 0:
+        return {"in_common_crawl": False, "captures": 0}
+
+    # Step 2: Fetch a sample of captures for metadata
+    resp2 = httpx.get(
+        f"{CC_INDEX_URL}/{CC_LATEST_CRAWL}-index",
+        params={"url": f"*.{domain}", "output": "json", "limit": "10"},
+        timeout=30,
+    )
+    captures = [json.loads(line) for line in resp2.text.strip().split("\n") if line]
+
+    return {
+        "in_common_crawl": True,
+        "estimated_pages": page_count * data.get("pageSize", 5),
+        "sample_captures": captures[:5],
+        "latest_crawl": CC_LATEST_CRAWL,
     }
-  };
-  source.onerror = () => source.close();
-  return () => source.close();
-}, [jobId]);
 ```
 
-**WSGI compatibility:** Under WSGI (gunicorn), each SSE connection ties up one worker thread for its duration. For single-user-watching-single-job (30-60 seconds), this is acceptable with `gunicorn --worker-class gthread --threads 4`. Do NOT switch to ASGI/Daphne/Uvicorn just for this -- the complexity is not justified for the expected concurrent load.
+**Rate limiting considerations:**
+- CC Index API is heavily rate limited. Single-threaded, serial requests only.
+- Include proper User-Agent header.
+- Sleep between requests if querying multiple domains.
+- If IP gets blocked (HTTP 503), wait 24 hours.
+- For our use case (one domain per pipeline run), rate limits are not a concern.
 
-**Gunicorn config adjustment:**
-```bash
-gunicorn scrapegrape.wsgi:application \
-  --worker-class gthread \
-  --workers 2 \
-  --threads 4 \
-  --timeout 120  # Allow SSE connections up to 2 minutes
+**Discovering the latest crawl ID:**
+```python
+resp = httpx.get(f"{CC_INDEX_URL}/collinfo.json", timeout=15)
+crawls = resp.json()
+latest = crawls[0]["cdx-api"]  # Most recent crawl's API endpoint
 ```
 
-**Confidence:** HIGH -- StreamingHttpResponse is core Django; EventSource is a W3C standard. Pattern is well-documented across multiple sources.
+**Confidence:** HIGH -- CC Index API is well-documented, stable, and our use case (single domain lookup) is trivially within rate limits. httpx is already in deps.
 
-### 4. Metadata Extraction: extruct
+### 2. Google News Inclusion Detection: No new library needed
 
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
-| extruct | >=0.18.0 | Extract JSON-LD, OpenGraph, Microdata, RDFa, Microformat from HTML | Single library covering all structured metadata formats; from Scrapinghub (Zyte's parent company); battle-tested at scale |
+| lxml (existing, transitive) | N/A | Parse sitemap XML for news namespace | Already installed via extruct; handles XML namespace queries |
+| extruct (existing) | >=0.18.0 | Detect NewsArticle schema.org types | Already in pipeline; `ARTICLE_TYPES` already includes `NewsArticle` |
 
-**What it extracts (all from a single HTML string):**
-- **JSON-LD** -- Schema.org structured data (articles, organizations, breadcrumbs)
-- **OpenGraph** -- Facebook/social metadata (og:title, og:type, og:image, og:description)
-- **Microdata** -- HTML5 itemscope/itemprop attributes
-- **RDFa** -- Semantic web annotations
-- **Microformat** -- hCard, hEntry patterns (via mf2py)
-- **Dublin Core** -- DC metadata
+**What "Google News inclusion" means for the report card:**
+
+Google News inclusion cannot be definitively confirmed programmatically (only Google knows). What we CAN detect are the **signals that a publisher has optimized for Google News**:
+
+1. **News sitemap presence** -- sitemap XML with `xmlns:news="http://www.google.com/schemas/sitemap-news/0.9"` namespace
+2. **NewsArticle schema.org markup** -- JSON-LD with `@type: "NewsArticle"` (already detected by existing article extraction step)
+3. **NewsMediaOrganization schema.org markup** -- publisher identifies as news org (already scored in `_score_jsonld_candidate`)
+4. **Google Publisher Center signals** -- presence of `<meta name="google-news-link-text">` or `<link rel="dns-prefetch" href="//news.google.com">`
+
+**News sitemap detection approach:**
+
+The existing `run_sitemap_step` already discovers sitemap URLs. The new step fetches each discovered sitemap and checks for the Google News XML namespace:
 
 ```python
-import extruct
+from lxml import etree
 
-metadata = extruct.extract(
-    html_string,
-    base_url=url,
-    syntaxes=["json-ld", "opengraph", "microdata"],  # Only extract what we need
-    uniform=True,  # Normalize output format across syntaxes
-)
-# Returns: {"json-ld": [...], "opengraph": [...], "microdata": [...]}
+NEWS_NS = "http://www.google.com/schemas/sitemap-news/0.9"
+
+def detect_news_sitemap(sitemap_xml: str) -> dict:
+    """Check if a sitemap contains Google News namespace elements."""
+    try:
+        root = etree.fromstring(sitemap_xml.encode("utf-8"))
+    except etree.XMLSyntaxError:
+        return {"is_news_sitemap": False, "error": "invalid XML"}
+
+    # Check namespace declaration
+    nsmap = root.nsmap
+    has_news_ns = NEWS_NS in nsmap.values()
+
+    # Check for actual news:news elements
+    news_elements = root.findall(f".//{{{NEWS_NS}}}news")
+
+    if news_elements:
+        # Extract sample data
+        sample = []
+        for elem in news_elements[:5]:
+            pub_name = elem.findtext(f"{{{NEWS_NS}}}publication/{{{NEWS_NS}}}name")
+            title = elem.findtext(f"{{{NEWS_NS}}}title")
+            pub_date = elem.findtext(f"{{{NEWS_NS}}}publication_date")
+            sample.append({"name": pub_name, "title": title, "date": pub_date})
+
+        return {
+            "is_news_sitemap": True,
+            "news_entry_count": len(news_elements),
+            "sample_entries": sample,
+        }
+
+    return {"is_news_sitemap": has_news_ns, "news_entry_count": 0}
 ```
 
-**Transitive dependencies:** lxml, w3lib, rdflib, mf2py, html-text, jstyleson. The `lxml` C extension is the heaviest -- the manylinux wheel should install on `python:3.12-slim` without additional apt packages. Test during Docker build.
+**Integration point:** This step runs AFTER `run_sitemap_step` (which provides sitemap URLs). It fetches each sitemap URL and checks for news namespace. The existing `FetchStrategyManager` handles the HTTP fetching.
 
-**Confidence:** HIGH -- v0.18.0 released Nov 2024, stable, Python 3.12 compatible.
+**NewsArticle detection is already built:**
+- `ARTICLE_TYPES` in `steps.py` already includes `NewsArticle`, `OpinionNewsArticle`, `AnalysisNewsArticle`, `ReportageNewsArticle`, `ReviewNewsArticle`
+- `ORG_TYPES` already includes `NewsMediaOrganization`
+- The existing article extraction step already captures the `@type` field
 
-### 5. Robots.txt Parsing: protego
+The new step merely needs to aggregate these existing signals into a "Google News readiness" score.
+
+**Confidence:** HIGH -- lxml namespace parsing is well-documented. News sitemap schema (xmlns:news/0.9) is stable since 2014. Existing pipeline already captures most signals.
+
+### 3. Update Frequency Estimation: feedparser + stdlib statistics
 
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
-| protego | >=0.3.1 | Parse robots.txt files per RFC 9309 | Battle-tested in Scrapy; handles wildcards and $ anchors correctly; extracts Sitemap: directives |
+| feedparser | 6.0.12 | Parse RSS/Atom feed entries with dates | De facto standard; handles all feed formats; robust date parsing across dozens of date formats |
+| statistics (stdlib) | N/A | Calculate median/mean of publication intervals | No dependency; stdlib `statistics.median` and `statistics.mean` are sufficient |
+| datetime (stdlib) | N/A | Date arithmetic for interval calculation | Standard library |
 
-**Why protego over stdlib urllib.robotparser:**
+**Why feedparser for update frequency (not just sitemap lastmod):**
 
-`urllib.robotparser` has known bugs and does not fully implement RFC 9309 (the current robots.txt standard). It mishandles wildcard patterns and `$` anchors. protego is the parser used by Scrapy, tested against millions of real-world robots.txt files.
+Sitemap `<lastmod>` values are unreliable. Google has publicly stated they verify lastmod accuracy before trusting it. Many CMS platforms set lastmod to the current date on every sitemap regeneration, making it useless for frequency estimation.
 
-**Why protego over robotspy:**
+RSS/Atom feeds are MORE reliable for frequency estimation because:
+- Feed entries have `published` dates set at article creation time (harder to fake)
+- Feeds are ordered chronologically by nature
+- feedparser normalizes dozens of date formats into Python time tuples
 
-robotspy (v0.12.0) is RFC 9309 compliant but has a smaller user base. protego's Scrapy lineage gives more confidence for edge cases.
+**Two-source approach for robustness:**
 
-**Key capabilities needed:**
-- Check if URL is allowed/disallowed for a user-agent
-- Extract `Sitemap:` directives (feeds into sitemap discovery pipeline step)
-- Read `Crawl-delay` values
-- Handle wildcards (`*`) and end-of-string anchors (`$`)
-
-**RSL integration note:** RSL 1.0 adds `License:` directives to robots.txt. protego does not parse these natively. Scan the raw robots.txt text for `License:` lines separately (simple string parsing, no library needed). See RSL section below.
+1. **RSS/Atom feeds** (primary): Parse feed entries, extract `published_parsed` dates, calculate intervals
+2. **Sitemap lastmod** (secondary, with validation): Parse sitemap XML `<lastmod>` values, but validate by checking if dates are all identical or suspiciously regular
 
 ```python
-from protego import Protego
-
-rp = Protego.parse(robots_txt_content)
-allowed = rp.can_fetch("https://example.com/article/123", "itsascout-bot")
-sitemaps = list(rp.sitemaps)  # Sitemap: directives
-crawl_delay = rp.crawl_delay("itsascout-bot")
-```
-
-**Confidence:** MEDIUM -- protego is well-established in the Scrapy ecosystem. Exact latest version number should be verified at install time.
-
-### 6. Sitemap Discovery: ultimate-sitemap-parser
-
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| ultimate-sitemap-parser | >=1.8.0 | Discover and parse sitemaps | All sitemap formats (XML, News, text, RSS, Atom); automatic discovery from robots.txt + common paths; memory-efficient streaming; pluggable HTTP client |
-
-**Key capabilities:**
-- Discovers sitemaps from robots.txt `Sitemap:` directives
-- Falls back to common paths (`/sitemap.xml`, `/sitemap_index.xml`)
-- Handles sitemap indexes (nested sitemaps)
-- Parses all formats: XML, Google News, plain text, RSS 2.0, Atom
-- `all_pages()` returns a generator (memory efficient for sites with millions of URLs)
-- **Custom HTTP client support** via `AbstractWebClient` -- plug in curl-cffi for TLS fingerprinting
-
-**Usage for report card:**
-```python
-from usp.tree import sitemap_tree_for_homepage
-import itertools
-
-tree = sitemap_tree_for_homepage("https://example.com")
-
-# For the report card: check existence and sample
-sub_sitemaps = [s for s in tree.sub_trees if s.url]
-sitemap_count = len(sub_sitemaps)
-page_sample = list(itertools.islice(tree.all_pages(), 100))  # Sample first 100
-total_estimate = len(page_sample)  # Or iterate fully if needed
-```
-
-**Custom HTTP client integration (v1.8+):**
-USP accepts a custom HTTP client implementing `AbstractWebClient`. This lets sitemap fetching use curl-cffi for TLS fingerprinting, consistent with the rest of the pipeline. The implementations in `usp.web_client.requests_client` serve as a reference for building a curl-cffi adapter.
-
-**Confidence:** HIGH -- v1.8.0 released Jan 2026, actively maintained, field-tested on ~1M sitemaps (Media Cloud project).
-
-### 7. RSL (Really Simple Licensing) Detection -- Custom Implementation
-
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| lxml | (transitive via extruct) | Parse HTML for RSL tags; parse RSL XML documents | Already installed; fast XML/HTML parser |
-| No dedicated RSL Python library exists | N/A | Custom detection module required | RSL 1.0 finalized late 2025; too new for ecosystem libraries |
-
-**What is RSL:**
-
-RSL (Really Simple Licensing) is an open, XML-based standard that lets publishers define machine-readable licensing terms for digital content. It specifies what AI crawlers, search engines, and other automated systems are allowed to do with the content (indexing, training, inference) and what compensation is required.
-
-**RSL 1.0 defines 4 discovery mechanisms to detect:**
-
-**A. HTML `<head>` tags (page-level license):**
-```html
-<!-- Inline RSL license -->
-<script type="application/rsl+xml">
-  <rsl xmlns="https://rslstandard.org/rsl/1.0">
-    <content url="https://example.com/article/123">
-      <license>
-        <terms>
-          <use type="search-indexing" allowed="true" />
-          <use type="ai-training" allowed="false" />
-        </terms>
-      </license>
-    </content>
-  </rsl>
-</script>
-
-<!-- External RSL license file reference -->
-<link rel="license" type="application/rsl+xml"
-      href="https://example.com/license.xml" />
-```
-**Detection:** Find `<script type="application/rsl+xml">` or `<link rel="license" type="application/rsl+xml">` in the `<head>`.
-
-**B. HTTP `Link` response header:**
-```
-Link: <https://example.com/license.xml>; rel="license"; type="application/rsl+xml"
-```
-**Detection:** Parse the `Link` HTTP header for entries with `type="application/rsl+xml"`.
-
-**C. robots.txt `License:` directive (site-level):**
-```
-License: https://example.com/license.xml
-```
-**Detection:** Scan robots.txt for lines starting with `License:`. This directive is global (not per user-agent).
-
-**D. RSS feed `rsl:` namespace (feed-level):**
-RSL elements can be embedded in RSS feeds using the `rsl:` XML namespace prefix on the root `<rss>` element. This ties into RSS feed discovery.
-
-**License precedence rule:** When multiple licenses are discovered (e.g., site-wide in robots.txt and page-level in HTML), the most specific license (page-level) takes precedence.
-
-**Implementation plan:** Build an `rsl_detector.py` module:
-1. Check HTML `<head>` for `application/rsl+xml` script/link tags (lxml)
-2. Check HTTP response `Link` headers (string parsing)
-3. Check robots.txt for `License:` directives (string parsing)
-4. If external RSL file URL found, fetch and parse the XML with lxml
-5. Return structured result: `{found: bool, sources: ["html"|"header"|"robots"], license_urls: [...], terms: {...}}`
-
-No third-party library needed -- RSL detection is HTML tag scanning + XML parsing, both handled by lxml (already installed via extruct).
-
-**Confidence:** MEDIUM -- RSL 1.0 spec is published and stable, but the standard is brand new (finalized late 2025). Detection logic is straightforward. The spec may evolve, but the discovery mechanisms (HTML tags, HTTP headers, robots.txt) are well-defined and unlikely to change structurally.
-
-### 8. URL Sanitization/Normalization: url-normalize
-
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| url-normalize | >=2.2.1 | Canonicalize and normalize URLs for consistent storage and deduplication | Handles IDN, percent-encoding, scheme defaulting, trailing slashes, query param sorting; 3.9M downloads/month; MIT license |
-
-**Why url-normalize over w3lib.canonicalize_url or manual urllib.parse:**
-
-The existing codebase has a bare-bones `normalize_url()` in `tasks.py` that only extracts `scheme://netloc`. This is insufficient for v2.0 where we need canonical URL comparison, deduplication, and consistent database storage.
-
-`w3lib` is already a transitive dependency (via extruct) and has `canonicalize_url()`, but url-normalize is purpose-built for URL normalization with better IDN (internationalized domain name) handling and a cleaner API.
-
-```python
-from url_normalize import url_normalize
-
-normalized = url_normalize("HTTP://Example.COM:80/foo/../bar?b=2&a=1")
-# Returns: "http://example.com/bar?a=1&b=2"
-
-# Handles: scheme lowering, host lowering, default port removal,
-# path normalization (../ resolution), query param sorting,
-# percent-encoding normalization, IDN domains
-```
-
-**Confidence:** HIGH -- v2.2.1 released April 2025, stable, MIT licensed, widely used.
-
-### 9. RSS/Atom Feed Discovery: feedparser + BeautifulSoup
-
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| feedparser | >=6.0.12 | Validate and parse discovered RSS/Atom/JSON feeds | De facto standard; handles RSS 1.0/2.0, Atom, CDF; robust error handling for malformed feeds |
-| beautifulsoup4 | (transitive via extruct -> mf2py) | Scan HTML `<link>` tags for feed URLs | Already installed; simpler than raw lxml for this tag-scanning task |
-
-**Why no feedsearch-crawler or feedsearch library:**
-
-Existing feed discovery libraries are either unmaintained or pull in heavy async dependencies (aiohttp). Feed discovery is simple enough to implement in ~30 lines:
-
-1. Parse HTML `<link>` tags with `type="application/rss+xml"` or `type="application/atom+xml"`
-2. Check common feed paths (`/feed`, `/rss`, `/atom.xml`, `/feed.xml`, `/rss.xml`, `/index.xml`)
-3. Validate candidates with `feedparser.parse()` to confirm they are real feeds
-
-```python
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin
 import feedparser
+from datetime import datetime, timezone
+from statistics import median, mean
 
-COMMON_FEED_PATHS = ["/feed", "/rss", "/atom.xml", "/feed.xml", "/rss.xml", "/index.xml", "/feed/rss"]
+def estimate_frequency_from_feed(feed_url: str, feed_content: str) -> dict:
+    """Estimate publishing frequency from RSS/Atom feed entries."""
+    parsed = feedparser.parse(feed_content)
 
-def discover_feeds(html: str, base_url: str) -> list[dict]:
-    soup = BeautifulSoup(html, "lxml")
-    candidates = []
+    if not parsed.entries:
+        return {"source": "rss", "estimable": False, "reason": "no entries"}
 
-    # 1. Check <link> tags in HTML
-    for link in soup.find_all("link", type=["application/rss+xml", "application/atom+xml"]):
-        href = link.get("href")
-        if href:
-            candidates.append({"url": urljoin(base_url, href), "title": link.get("title", "")})
+    # Extract dates
+    dates = []
+    for entry in parsed.entries:
+        if entry.get("published_parsed"):
+            dt = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+            dates.append(dt)
 
-    # 2. Check common paths (only if no <link> tags found)
-    if not candidates:
-        for path in COMMON_FEED_PATHS:
-            candidates.append({"url": urljoin(base_url, path), "title": ""})
+    if len(dates) < 2:
+        return {"source": "rss", "estimable": False, "reason": "insufficient dates"}
 
-    # 3. Validate with feedparser
-    validated = []
-    for candidate in candidates:
-        parsed = feedparser.parse(candidate["url"])
-        if parsed.feed.get("title") or parsed.entries:
-            validated.append({
-                "url": candidate["url"],
-                "title": parsed.feed.get("title", candidate["title"]),
-                "type": parsed.version,  # e.g. "rss20", "atom10"
-                "entry_count": len(parsed.entries),
-            })
+    dates.sort(reverse=True)
 
-    return validated
+    # Calculate intervals between consecutive articles
+    intervals = []
+    for i in range(len(dates) - 1):
+        delta = dates[i] - dates[i + 1]
+        intervals.append(delta.total_seconds() / 3600)  # hours
+
+    median_hours = median(intervals)
+    mean_hours = mean(intervals)
+
+    # Classify frequency
+    if median_hours < 1:
+        frequency = "multiple_per_hour"
+    elif median_hours < 24:
+        frequency = "multiple_per_day"
+    elif median_hours < 48:
+        frequency = "daily"
+    elif median_hours < 168:
+        frequency = "several_per_week"
+    elif median_hours < 336:
+        frequency = "weekly"
+    elif median_hours < 1440:
+        frequency = "several_per_month"
+    else:
+        frequency = "monthly_or_less"
+
+    return {
+        "source": "rss",
+        "estimable": True,
+        "frequency": frequency,
+        "median_interval_hours": round(median_hours, 1),
+        "mean_interval_hours": round(mean_hours, 1),
+        "sample_size": len(dates),
+        "date_range_days": round((dates[0] - dates[-1]).total_seconds() / 86400, 1),
+    }
 ```
 
-**Note on RSL in RSS feeds:** feedparser does not understand RSL namespaced elements. If an RSS feed contains `rsl:` prefixed elements, extract the raw XML and parse RSL separately with lxml.
+**Sitemap lastmod validation:**
 
-**Confidence:** HIGH -- feedparser 6.0.12 released Sep 2025. BeautifulSoup4 is a transitive dependency.
+```python
+from lxml import etree
+from datetime import datetime
+
+SITEMAP_NS = "http://www.sitemaps.org/schemas/sitemap/0.9"
+
+def extract_sitemap_lastmod_dates(sitemap_xml: str) -> list[datetime]:
+    """Extract and validate lastmod dates from sitemap XML."""
+    root = etree.fromstring(sitemap_xml.encode("utf-8"))
+    dates = []
+    for lastmod in root.findall(f".//{{{SITEMAP_NS}}}lastmod"):
+        text = lastmod.text
+        if text:
+            # Parse ISO 8601 dates (W3C Datetime format)
+            try:
+                dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+                dates.append(dt)
+            except ValueError:
+                continue
+    return dates
+
+def validate_lastmod_reliability(dates: list[datetime]) -> bool:
+    """Check if lastmod dates appear genuine (not all identical)."""
+    if len(dates) < 3:
+        return False
+    unique_dates = set(d.date() for d in dates)
+    # If >80% of dates are the same day, lastmod is likely auto-generated
+    most_common_count = max(dates.count(d) for d in set(dates))
+    return most_common_count / len(dates) < 0.5
+```
+
+**Why NOT polars for frequency calculation:**
+
+Polars is already in deps and has excellent time-series support, but using it for ~20-50 date intervals is overkill. stdlib `statistics.median` and `statistics.mean` on a list of floats is clearer and has zero overhead. If the project later needs to analyze thousands of timestamps across many publishers, polars would be appropriate then.
+
+**Confidence:** HIGH -- feedparser 6.0.12 (Sep 2025) is current. Date parsing and interval calculation are straightforward stdlib operations.
+
+### 4. Sitemap Content Fetching: Existing FetchStrategyManager
+
+| Technology | Version | Purpose | Why |
+|------------|---------|---------|-----|
+| FetchStrategyManager (existing) | N/A | Fetch sitemap XML content for parsing | Already handles curl-cffi + Zyte fallback; consistent with pipeline pattern |
+
+**Current gap:** The existing `run_sitemap_step` discovers sitemap URLs but does NOT fetch their content. It only validates that a response looks like XML (`<?xml` or `<urlset>` check). The new features need to actually parse sitemap content for:
+- News namespace detection
+- lastmod date extraction
+
+**Approach:** Add a `run_sitemap_analysis_step` that takes the sitemap URLs from `run_sitemap_step` output, fetches each one via `FetchStrategyManager`, and parses the XML with lxml.
+
+**Confidence:** HIGH -- pure integration of existing components.
 
 ---
 
@@ -439,103 +320,104 @@ def discover_feeds(html: str, base_url: str) -> list[dict]:
 
 | Category | Recommended | Alternative | Why Not |
 |----------|-------------|-------------|---------|
-| HTTP Client | curl-cffi | httpx | No TLS fingerprinting; blocked by bot detection |
-| HTTP Client | curl-cffi | requests | No TLS fingerprinting; no HTTP/2 |
-| Task Queue | django-rq | Celery | Overkill config complexity; RabbitMQ not needed |
-| Task Queue | django-rq | django_tasks DatabaseBackend | No real workers; no progress tracking; DB polling |
-| Task Queue | django-rq | Huey | Less Django integration; django-rq admin panel wins |
-| SSE | StreamingHttpResponse | django-eventstream | Extra dependency for simple use case |
-| SSE | StreamingHttpResponse | WebSockets (channels) | Unidirectional is sufficient; ASGI migration too costly |
-| SSE | StreamingHttpResponse | Polling from React | Higher latency; more frontend complexity; more server load |
-| Metadata | extruct | Manual parsing per-format | extruct handles 6 formats; manual is error-prone |
-| robots.txt | protego | urllib.robotparser | Known bugs; incomplete RFC 9309 |
-| robots.txt | protego | robotspy | Less battle-tested than Scrapy-proven protego |
-| Sitemap | ultimate-sitemap-parser | Manual XML parsing | USP handles all formats, indexes, discovery automatically |
-| URL normalization | url-normalize | w3lib.canonicalize_url | url-normalize has better IDN handling, purpose-built API |
-| URL normalization | url-normalize | Manual urllib.parse | Misses edge cases (IDN, encoding normalization) |
-| Feed discovery | feedparser + BS4 | feedsearch-crawler | Unmaintained; heavy aiohttp dep; too simple to need a library |
-| RSL detection | Custom (lxml) | N/A | No Python RSL library exists yet |
+| CC Index query | httpx (direct API) | cdx-toolkit | Overkill for single-domain presence check; adds dep + WARC/pagination abstractions we don't need |
+| CC Index query | httpx (direct API) | comcrawl | Unmaintained; limited filtering; intended for small projects only |
+| News sitemap parsing | lxml (existing) | BeautifulSoup4 | lxml handles XML namespaces natively; BS4 is for HTML not XML |
+| News sitemap parsing | lxml (existing) | ultimate-sitemap-parser | USP discovers sitemaps but doesn't expose news namespace metadata; we already have discovery |
+| Feed parsing | feedparser | atoma | feedparser is more battle-tested; broader format support |
+| Feed parsing | feedparser | Raw XML parsing with lxml | feedparser handles dozens of date formats automatically; not worth reimplementing |
+| Frequency stats | stdlib statistics | polars | Overkill for 20-50 data points; stdlib is clearer |
+| Frequency stats | stdlib statistics | numpy | Unnecessary dependency addition for simple median/mean |
 
 ---
 
-## Infrastructure Additions (Docker Compose)
-
-### Redis Server
-
-```yaml
-redis:
-  image: redis:7-alpine
-  ports:
-    - "6379:6379"
-  volumes:
-    - redis_data:/data
-  healthcheck:
-    test: ["CMD", "redis-cli", "ping"]
-    interval: 10s
-    timeout: 5s
-    retries: 3
-```
-
-### RQ Worker Service
-
-```yaml
-rqworker:
-  build: .
-  command: uv run python scrapegrape/manage.py rqworker default
-  depends_on:
-    redis:
-      condition: service_healthy
-    postgres:
-      condition: service_started
-  env_file: .env
-  volumes:
-    - .:/app
-```
-
-### Django Settings Additions
-
-```python
-INSTALLED_APPS += ["django_rq"]
-
-RQ_QUEUES = {
-    "default": {
-        "HOST": os.getenv("REDIS_HOST", "redis"),
-        "PORT": int(os.getenv("REDIS_PORT", 6379)),
-        "DB": 0,
-        "DEFAULT_TIMEOUT": 300,  # 5 min per job
-    }
-}
-```
-
-### URL Configuration Addition
-
-```python
-urlpatterns += [
-    path("admin/django-rq/", include("django_rq.urls")),  # RQ admin dashboard
-]
-```
-
----
-
-## Installation Summary
+## Installation
 
 ```bash
-# Add new Python dependencies to pyproject.toml
-uv add curl-cffi django-rq extruct protego ultimate-sitemap-parser url-normalize feedparser
+# Single new dependency
+uv add feedparser
 
-# Transitive dependencies (no explicit add needed):
-# - lxml (via extruct)
-# - beautifulsoup4 (via extruct -> mf2py)
-# - w3lib (via extruct)
-# - redis (via rq -> django-rq)
-# - rq (via django-rq)
-
-# No new npm packages needed:
-# - EventSource is a browser-native API
-# - No SSE client library required
+# Everything else is already in deps:
+# - httpx (for CC Index API)
+# - lxml (transitive via extruct, for sitemap XML parsing)
+# - extruct (for NewsArticle schema detection -- already used)
+# - protego (for robots.txt -- already used)
+# - statistics (stdlib)
+# - datetime (stdlib)
 ```
 
-**Removals:** None. Keep all existing dependencies unchanged.
+**That's it.** One new package. The rest leverages the existing stack.
+
+---
+
+## What NOT to Add (Already Have It)
+
+| Capability | Already Covered By | Location |
+|------------|--------------------|----------|
+| Sitemap URL discovery | `run_sitemap_step` | `steps.py` |
+| RSS feed URL discovery | `run_rss_step` | `steps.py` |
+| NewsArticle type detection | `ARTICLE_TYPES` set + extruct | `steps.py` |
+| NewsMediaOrganization detection | `ORG_TYPES` set + extruct | `steps.py` |
+| HTTP fetching with TLS fingerprinting | `FetchStrategyManager` | `fetchers/manager.py` |
+| robots.txt parsing | protego | `steps.py` |
+| JSON-LD/OpenGraph/Microdata extraction | extruct | `steps.py` |
+| XML parsing (lxml) | Transitive via extruct | Already installed |
+
+---
+
+## Integration Points with Existing Pipeline
+
+### New Pipeline Steps (added to supervisor.py)
+
+| Step | Depends On | New Library | Placement |
+|------|-----------|-------------|-----------|
+| Common Crawl presence check | publisher.domain | httpx (existing) | After robots step (independent, can run early) |
+| Sitemap content analysis (news detection + lastmod) | sitemap_result (URLs) | lxml (existing) | After sitemap step |
+| RSS feed content analysis (update frequency) | rss_result (URLs) | feedparser (NEW) | After RSS step |
+| Google News signals aggregation | article_result + sitemap_analysis + publisher_details | None (aggregation only) | After article extraction |
+
+### New Model Fields (on ResolutionJob and/or Publisher)
+
+```python
+# ResolutionJob -- per-job results
+cc_result = models.JSONField(null=True, blank=True)       # Common Crawl presence
+news_result = models.JSONField(null=True, blank=True)      # Google News signals
+frequency_result = models.JSONField(null=True, blank=True)  # Update frequency
+
+# Publisher -- flat fields
+in_common_crawl = models.BooleanField(null=True)
+cc_estimated_pages = models.IntegerField(null=True)
+has_news_sitemap = models.BooleanField(null=True)
+google_news_signals = models.JSONField(null=True, blank=True)
+update_frequency = models.CharField(max_length=30, blank=True, default="")
+update_frequency_hours = models.FloatField(null=True)
+```
+
+### Data Flow
+
+```
+Existing pipeline steps:
+  robots_step --> sitemap_step --> rss_step --> [existing steps]
+
+New steps inserted after their dependencies:
+  robots_step
+    |
+    +--> cc_presence_step (parallel-safe, no deps on other steps)
+    |
+    +--> sitemap_step
+    |      |
+    |      +--> sitemap_analysis_step (news detection + lastmod dates)
+    |
+    +--> rss_step
+    |      |
+    |      +--> rss_frequency_step (feedparser date extraction)
+    |
+    +--> [existing steps: RSL, publisher_details, article_extraction...]
+    |
+    +--> google_news_signals_step (aggregates: news sitemap + NewsArticle type + NewsMediaOrg)
+    |
+    +--> frequency_estimation_step (merges: RSS dates + sitemap lastmod dates)
+```
 
 ---
 
@@ -543,104 +425,31 @@ uv add curl-cffi django-rq extruct protego ultimate-sitemap-parser url-normalize
 
 | New Dependency | Size Impact | C Extension? | Docker Concern |
 |----------------|-------------|--------------|----------------|
-| curl-cffi >=0.14.0 | ~15MB (bundled libcurl) | Yes (cffi + curl) | Verify linux/amd64 wheel on python:3.12-slim |
-| django-rq >=3.0 | Small | No | None |
-| extruct >=0.18.0 | Medium (pulls lxml, rdflib) | Yes (lxml) | lxml wheel may need libxml2; test `uv sync` in Docker |
-| protego >=0.3.1 | Small | No | None |
-| ultimate-sitemap-parser >=1.8.0 | Small | No | None |
-| url-normalize >=2.2.1 | Tiny | No | None |
-| feedparser >=6.0.12 | Small | No | None |
+| feedparser >=6.0.12 | Small (~200KB) | No | None |
 
-**Dockerfile note:** May need to add `libxml2-dev libxslt-dev` to apt-get if lxml's manylinux wheel does not cover `python:3.12-slim`. Test first -- the wheel usually works without system packages. If it fails:
-
-```dockerfile
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libxml2-dev libxslt-dev \
-    && rm -rf /var/lib/apt/lists/*
-```
-
----
-
-## Integration Architecture Summary
-
-```
-React (Inertia page)
-  |
-  |-- POST /api/analyze (Django view) --> enqueue job to RQ --> return job_id
-  |
-  |-- EventSource /api/analysis/{job_id}/progress (SSE endpoint)
-  |     |
-  |     +-- reads job.meta from Redis (set by RQ worker)
-  |
-  RQ Worker (separate process):
-    1. Normalize URL (url-normalize)
-    2. Fetch robots.txt (curl-cffi) --> parse (protego) --> extract Sitemap: and License:
-    3. Fetch HTML (curl-cffi, fallback Zyte) --> store for reuse
-    4. Extract metadata (extruct on stored HTML)
-    5. Detect RSL (custom lxml parsing on stored HTML + robots.txt License: + HTTP headers)
-    6. Discover RSS feeds (BeautifulSoup on stored HTML + feedparser validation)
-    7. Discover/parse sitemaps (ultimate-sitemap-parser using robots.txt Sitemap: directives)
-    8. WAF detection (existing wafw00f)
-    9. ToS discovery + evaluation (existing pydantic-ai agents)
-    10. Compile report card --> save to PostgreSQL
-    Each step updates job.meta for SSE progress
-```
+All other capabilities use existing dependencies. Zero new C extensions. Zero Docker changes.
 
 ---
 
 ## Sources
 
-### curl-cffi
-- [curl-cffi PyPI](https://pypi.org/project/curl-cffi/) -- v0.14.0, Python 3.10+
-- [curl-cffi GitHub](https://github.com/lexiforest/curl_cffi) -- browser TLS impersonation
-- [curl-cffi vs httpx](https://webscraping.fyi/lib/compare/python-curl-cffi-vs-python-httpx/) -- performance comparison
-- [curl-cffi documentation](https://curl-cffi.readthedocs.io/) -- AsyncSession, impersonation API
+### Common Crawl CDX API
+- [CC Index Server](https://index.commoncrawl.org) -- API documentation and endpoint listing
+- [cdx-toolkit GitHub](https://github.com/commoncrawl/cdx_toolkit) -- reference for API patterns (decided against using as library)
+- [cdx-toolkit PyPI](https://pypi.org/project/cdx-toolkit/) -- v0.9.38, Nov 2025, Python >=3.9
+- [CC FAQ](https://commoncrawl.org/faq) -- rate limiting guidance
+- [Searching 100B Pages with CDX](https://skeptric.com/searching-100b-pages-cdx/) -- practical CC Index API usage patterns
 
-### django-rq / RQ
-- [django-rq GitHub](https://github.com/rq/django-rq) -- v3.0+ changelog, Django 5.x support
-- [django-rq PyPI](https://pypi.org/project/django-rq/) -- latest version
-- [RQ PyPI](https://pypi.org/project/rq/) -- v2.6.1
-- [Lightweight Django Task Queues 2025](https://medium.com/@g.suryawanshi/lightweight-django-task-queues-in-2025-beyond-celery-74a95e0548ec) -- comparison
-- [django-rq Docker demo](https://github.com/ActionScripted/django-rq-demo/blob/master/docker-compose.yml) -- Docker pattern
-- [Django 6.0 Tasks review](https://www.loopwerk.io/articles/2026/django-tasks-review/) -- django_tasks limitations
+### Google News Sitemaps
+- [Google News Sitemap Documentation](https://developers.google.com/search/docs/crawling-indexing/sitemaps/news-sitemap) -- official spec
+- [Google News Schema (xmlns:news/0.9)](https://www.google.com/schemas/sitemap-news/0.9/) -- namespace definition
+- [lxml Namespace Handling](https://lxml.de/parsing.html) -- XPath with namespaces
+- [Google Article Structured Data](https://developers.google.com/search/docs/appearance/structured-data/article) -- NewsArticle schema requirements
+- [schema.org NewsArticle](https://schema.org/NewsArticle) -- type definition
 
-### Server-Sent Events
-- [Django Streaming HTTP Responses](https://blog.pecar.me/django-streaming-responses) -- SSE pattern
-- [SSE Minimalist Django](https://minimalistdjango.com/TIL/2024-04-21-server-sent-events/) -- WSGI considerations
-- [EventSource MDN](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events) -- browser API
-- [SSE in React 2026](https://oneuptime.com/blog/post/2026-01-15-server-sent-events-sse-react/view) -- React patterns
-- [Django Forum SSE discussion](https://forum.djangoproject.com/t/server-sent-event-in-django/17205) -- WSGI vs ASGI
-
-### extruct
-- [extruct PyPI](https://pypi.org/project/extruct/) -- v0.18.0
-- [extruct GitHub](https://github.com/scrapinghub/extruct) -- supported syntaxes
-
-### protego / robots.txt
-- [protego on PyPI](https://pypi.org/project/protego/) -- RFC 9309 compliant, Scrapy ecosystem
-- [robotspy PyPI](https://pypi.org/project/robotspy/) -- v0.12.0, alternative considered
-- [urllib.robotparser docs](https://docs.python.org/3/library/urllib.robotparser.html) -- stdlib, not recommended
-
-### Sitemap Discovery
-- [ultimate-sitemap-parser PyPI](https://pypi.org/project/ultimate-sitemap-parser/) -- v1.8.0
-- [USP custom HTTP client docs](https://ultimate-sitemap-parser.readthedocs.io/en/latest/guides/http-client.html) -- AbstractWebClient
-- [USP GitHub](https://github.com/GateNLP/ultimate-sitemap-parser) -- format support
-
-### RSL (Really Simple Licensing)
-- [RSL 1.0 Specification](https://rslstandard.org/rsl) -- full spec
-- [Adding RSL to Web Pages](https://rslstandard.org/guide/web-pages) -- HTML script/link tags
-- [Adding RSL to HTTP Headers](https://rslstandard.org/guide/http) -- Link header
-- [Adding RSL to robots.txt](https://rslstandard.org/guide/robots-txt) -- License directive
-- [RSL Crawler Authorization Protocol](https://rslstandard.org/guide/web-crawlers) -- CAP
-- [RSL File Format](https://rslstandard.org/guide/file-format) -- XML structure
-- [RSL WordPress Plugin](https://github.com/Jameswlepage/rsl-wp) -- reference implementation
-- [The Register RSL coverage](https://www.theregister.com/2025/12/10/really_simple_licensing_spec_takes/) -- industry context
-- [Fastly RSL blog](https://www.fastly.com/blog/control-and-monetize-your-content-with-the-rsl-standard) -- CDN integration context
-
-### URL Normalization
-- [url-normalize PyPI](https://pypi.org/project/url-normalize/) -- v2.2.1
-- [url-normalize GitHub](https://github.com/niksite/url-normalize) -- IDN support
-
-### Feed Discovery
-- [feedparser PyPI](https://pypi.org/project/feedparser/) -- v6.0.12
-- [feedparser GitHub](https://github.com/kurtmckee/feedparser) -- format support
-- [Python 3 Feedfinder patterns](https://alexmiller.phd/posts/python-3-feedfinder-rss-detection-from-url/) -- discovery approach
+### Feed Parsing and Update Frequency
+- [feedparser PyPI](https://pypi.org/project/feedparser/) -- v6.0.12, Sep 2025
+- [feedparser GitHub](https://github.com/kurtmckee/feedparser) -- date parsing capabilities
+- [feedparser Date Parsing docs](https://pythonhosted.org/feedparser/date-parsing.html) -- format handling
+- [Bing lastmod Importance](https://blogs.bing.com/webmaster/february-2023/The-Importance-of-Setting-the-lastmod-Tag-in-Your-Sitemap) -- lastmod reliability context
+- [sitemaps.org Protocol](https://www.sitemaps.org/protocol.html) -- lastmod W3C Datetime format spec

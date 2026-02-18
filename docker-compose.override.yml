@@ -1,0 +1,17 @@
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  django:
+    ports:
+      - "8000:8000"
+    command: uv run scrapegrape/manage.py runserver 0.0.0.0:8000
+
+  vite:
+    ports:
+      - "5173:5173"

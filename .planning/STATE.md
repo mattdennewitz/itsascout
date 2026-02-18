@@ -5,13 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-17)
 
 **Core value:** Paste a URL, get a comprehensive scraping report card with real-time progress as each check completes.
-**Current focus:** v2.0 shipped. Planning next milestone.
+**Current focus:** v2.1 Competitive Intelligence — Common Crawl, Google News, update frequency.
 
 ## Current Position
 
-Phase: v2.0 complete (11 phases shipped)
-Status: Milestone archived, ready for next milestone
-Last activity: 2026-02-17 -- v2.0 Core Workflow milestone completed and archived
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-17 — Milestone v2.1 started
 
 ## Performance Metrics
 
@@ -36,7 +37,7 @@ None yet.
 
 ### Roadmap Evolution
 
-- Phase 12 added: Django Built-in Authentication (not yet assigned to a milestone)
+- Phase 12 (Django Built-in Authentication) deferred — not in v2.1 scope
 
 ### Blockers/Concerns
 
@@ -45,5 +46,5 @@ None currently.
 ## Session Continuity
 
 Last session: 2026-02-17
-Stopped at: v2.0 milestone archived. Next step: /gsd:new-milestone
+Stopped at: Defining v2.1 requirements
 Resume file: None

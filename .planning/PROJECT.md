@@ -54,7 +54,15 @@ Paste a URL, get a comprehensive scraping report card — what's allowed, what's
 
 <!-- Current scope. Building toward these. -->
 
-(None — next milestone not yet defined. Run `/gsd:new-milestone` to start.)
+**Current Milestone: v2.1 Competitive Intelligence**
+
+**Goal:** Add competitive context signals to the report card — Common Crawl presence, Google News inclusion, and publisher update frequency.
+
+**Target features:**
+- Common Crawl domain presence check via CC Index API
+- Google News inclusion detection (news sitemap, NewsArticle schema)
+- Publisher update frequency estimation from sitemap lastmod / RSS dates
+- Report card UI sections for new intelligence signals
 
 ### Out of Scope
 
@@ -108,4 +116,4 @@ Paste a URL, get a comprehensive scraping report card — what's allowed, what's
 | Article freshness TTL separate from publisher | Articles may need re-checking more frequently than publisher metadata | ✓ Good — flexible caching granularity |
 
 ---
-*Last updated: 2026-02-17 after v2.0 milestone completion*
+*Last updated: 2026-02-17 after v2.1 milestone start*

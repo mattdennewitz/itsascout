@@ -96,6 +96,7 @@ def run_pipeline(job_id: str):
                     publisher=publisher, status="completed"
                 )
                 .exclude(id=job_id)
+                .exclude(waf_result__isnull=True)
                 .order_by("-created_at")
                 .values(
                     "waf_result", "tos_result", "robots_result",

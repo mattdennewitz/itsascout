@@ -179,48 +179,28 @@ def job_show(request, job_id):
     except ResolutionJob.DoesNotExist:
         return HttpResponseNotFound()
 
-    # When publisher steps were skipped (fresh TTL), job result fields are
-    # null. Fall back to the publisher's cached data so the report card
-    # renders fully instead of showing "Not checked" everywhere.
+    # When publisher steps were skipped (fresh TTL), job result fields may
+    # be null. Fall back to the most recent completed job for this publisher.
     pub = job.publisher
+    result_fields = [
+        "waf_result", "tos_result", "robots_result", "sitemap_result",
+        "rss_result", "rsl_result", "ai_bot_result", "metadata_result",
+    ]
+    needs_fallback = any(getattr(job, f) is None for f in result_fields)
 
-    waf_result = job.waf_result or {
-        "waf_detected": pub.waf_detected,
-        "waf_type": pub.waf_type,
-    }
-
-    tos_result = job.tos_result
-    if not tos_result and (pub.tos_url or pub.tos_permissions):
-        tos_result = {
-            "tos_url": pub.tos_url,
-            "permissions": pub.tos_permissions or [],
-        }
-
-    robots_result = job.robots_result
-    if not robots_result and pub.robots_txt_found is not None:
-        robots_result = {"robots_found": pub.robots_txt_found}
-
-    ai_bot_result = job.ai_bot_result
-    if not ai_bot_result and pub.ai_bot_blocks is not None:
-        ai_bot_result = {"bots": pub.ai_bot_blocks}
-
-    sitemap_result = job.sitemap_result or {
-        "sitemap_urls": pub.sitemap_urls or [],
-        "count": len(pub.sitemap_urls or []),
-    }
-
-    rss_result = job.rss_result or {
-        "feeds": [{"url": u} for u in (pub.rss_urls or [])],
-        "count": len(pub.rss_urls or []),
-    }
-
-    rsl_result = job.rsl_result
-    if not rsl_result and pub.rsl_detected is not None:
-        rsl_result = {"rsl_detected": pub.rsl_detected}
-
-    metadata_result = job.metadata_result
-    if not metadata_result and pub.publisher_details is not None:
-        metadata_result = {"organization": pub.publisher_details}
+    if needs_fallback:
+        prior = (
+            ResolutionJob.objects.filter(publisher=pub, status="completed")
+            .exclude(id=job.id)
+            .exclude(waf_result__isnull=True)
+            .order_by("-created_at")
+            .values(*result_fields)
+            .first()
+        )
+        if prior:
+            for f in result_fields:
+                if getattr(job, f) is None and prior[f] is not None:
+                    setattr(job, f, prior[f])
 
     return inertia_render(
         request,
@@ -234,14 +214,14 @@ def job_show(request, job_id):
                 "publisher_id": pub.id,
                 "publisher_name": pub.name,
                 "publisher_domain": pub.domain,
-                "waf_result": waf_result,
-                "tos_result": tos_result,
-                "robots_result": robots_result,
-                "sitemap_result": sitemap_result,
-                "rss_result": rss_result,
-                "rsl_result": rsl_result,
-                "ai_bot_result": ai_bot_result,
-                "metadata_result": metadata_result,
+                "waf_result": job.waf_result,
+                "tos_result": job.tos_result,
+                "robots_result": job.robots_result,
+                "sitemap_result": job.sitemap_result,
+                "rss_result": job.rss_result,
+                "rsl_result": job.rsl_result,
+                "ai_bot_result": job.ai_bot_result,
+                "metadata_result": job.metadata_result,
                 "article_result": job.article_result,
                 "created_at": job.created_at.isoformat(),
             },

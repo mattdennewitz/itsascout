@@ -25,6 +25,23 @@ class Publisher(models.Model):
     publisher_details = models.JSONField(null=True, blank=True)
     has_paywall = models.BooleanField(null=True)
 
+    # Competitive intelligence fields (Phase 13: Data Foundation)
+    # CC presence (populated by Phase 14)
+    cc_in_index = models.BooleanField(null=True)
+    cc_page_count = models.IntegerField(null=True, blank=True)
+    cc_last_crawl = models.CharField(max_length=20, blank=True, default="")
+
+    # News sitemap (populated by Phase 15)
+    has_news_sitemap = models.BooleanField(null=True)
+
+    # Google News readiness (populated by Phase 16)
+    google_news_readiness = models.CharField(max_length=20, blank=True, default="")
+
+    # Update frequency (populated by Phase 15)
+    update_frequency = models.CharField(max_length=50, blank=True, default="")
+    update_frequency_hours = models.FloatField(null=True, blank=True)
+    update_frequency_confidence = models.CharField(max_length=10, blank=True, default="")
+
     # NEW: Remembered fetch strategy (populated by FetchStrategyManager)
     FETCH_STRATEGY_CHOICES = [
         ("", "Auto (no preference)"),
@@ -83,8 +100,8 @@ class WAFReport(models.Model):
 
 class ResolutionJob(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    submitted_url = models.URLField()
-    canonical_url = models.URLField(db_index=True)
+    submitted_url = models.URLField(max_length=2048)
+    canonical_url = models.URLField(max_length=2048, db_index=True)
     publisher = models.ForeignKey(
         "Publisher", on_delete=models.CASCADE, related_name="resolution_jobs"
     )
@@ -111,6 +128,12 @@ class ResolutionJob(models.Model):
     ai_bot_result = models.JSONField(null=True, blank=True)
     metadata_result = models.JSONField(null=True, blank=True)
     article_result = models.JSONField(null=True, blank=True)
+
+    # Competitive intelligence step results (Phase 13: Data Foundation)
+    cc_result = models.JSONField(null=True, blank=True)
+    sitemap_analysis_result = models.JSONField(null=True, blank=True)
+    frequency_result = models.JSONField(null=True, blank=True)
+    news_signals_result = models.JSONField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]

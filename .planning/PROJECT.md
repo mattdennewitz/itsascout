@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A publisher website analysis tool where users paste a single URL and get a streaming scraping report card — WAF detection, ToS discovery, robots.txt analysis, metadata profiling, RSS/sitemap discovery, and RSL licensing checks. Publisher intelligence accumulates over time, so repeat lookups against the same domain are instant. Built on Django-Inertia with an async task pipeline and real-time SSE progress updates.
+A publisher website analysis tool where users paste a single URL and get a streaming scraping report card — WAF detection, ToS discovery, robots.txt analysis, metadata profiling, RSS/sitemap discovery, RSL licensing checks, and competitive intelligence signals (Common Crawl presence, Google News readiness, publishing frequency). Publisher intelligence accumulates over time, so repeat lookups against the same domain are instant. Built on Django-Inertia with an async task pipeline and real-time SSE progress updates.
 
 ## Core Value
 
@@ -50,41 +50,44 @@ Paste a URL, get a comprehensive scraping report card — what's allowed, what's
 - ✓ Field-presence table showing canonical fields across metadata formats — v2.0
 - ✓ Full integration test (URL submission → pipeline → completed job) — v2.0
 
+- ✓ Common Crawl domain presence check via CC CDX Index API — v2.1
+- ✓ Google News readiness detection (news sitemap, NewsArticle/NewsMediaOrganization schema) — v2.1
+- ✓ Publisher update frequency estimation from RSS dates with sitemap lastmod fallback — v2.1
+- ✓ Competitive Intelligence report card section with CC, Google News, and frequency — v2.1
+- ✓ Pipeline TTL skip paths for all competitive intelligence steps — v2.1
+- ✓ SSE progress events for all competitive intelligence steps — v2.1
+
 ### Active
 
 <!-- Current scope. Building toward these. -->
 
-**Current Milestone: v2.1 Competitive Intelligence**
-
-**Goal:** Add competitive context signals to the report card — Common Crawl presence, Google News inclusion, and publisher update frequency.
-
-**Target features:**
-- Common Crawl domain presence check via CC Index API
-- Google News inclusion detection (news sitemap, NewsArticle schema)
-- Publisher update frequency estimation from sitemap lastmod / RSS dates
-- Report card UI sections for new intelligence signals
+(No active milestone — use `/gsd:new-milestone` to start next)
 
 ### Out of Scope
 
 <!-- Explicit boundaries. Includes reasoning to prevent re-adding. -->
 
-- RSS feed crawling — just discover and remember URLs, don't fetch content
-- Sitemap crawling — discover existence, don't parse entries
+- RSS feed crawling — just discover and remember URLs, don't fetch content (v2.1 added date extraction for frequency)
+- Sitemap crawling — discover existence and sample for news namespace, don't parse all entries
 - Mobile app — web-first approach
 - SSR setup — adds Node.js process complexity, defer until needed
 - Batch/bulk URL analysis — single-URL flow first, batch later
+- Google News Publisher Center API — requires publisher authentication, not available to third parties
+- Real-time CC API monitoring — single point-in-time check per analysis, not ongoing monitoring
+- Competitor comparison — side-by-side intelligence for multiple publishers (future milestone)
 
 ## Context
 
-**Current state (post v2.0):**
+**Current state (post v2.1):**
 - Stack: Django 5.2 + React 19.1 + Inertia.js + Vite + TailwindCSS + Daphne ASGI
 - Architecture: Django views → inertia_render() → React page components, with SSE for real-time updates
 - Frontend: scrapegrape/frontend/ with 5 page components (Index, Create, Edit, BulkUpload, Jobs/Show)
-- Models: Publisher (domain, WAF, ToS, robots, sitemaps, RSS, RSL, fetch strategy, metadata profile), ResolutionJob (UUID, URL, status, pipeline results), ArticleMetadata
-- Pipeline: 10+ steps running sequentially in RQ worker — publisher resolution, WAF, ToS, robots.txt, sitemap, RSS, RSL, article extraction, paywall detection, metadata profiling
+- Models: Publisher (domain, WAF, ToS, robots, sitemaps, RSS, RSL, fetch strategy, metadata profile, CC presence, news sitemap, Google News readiness, update frequency), ResolutionJob (UUID, URL, status, pipeline results + cc_result, sitemap_analysis_result, frequency_result, news_signals_result), ArticleMetadata
+- Pipeline: 16 steps running sequentially in RQ worker — publisher resolution, WAF, ToS, robots.txt, sitemap, RSS, RSL, CC presence, sitemap analysis, frequency estimation, article extraction, paywall detection, metadata profiling, field presence, structured data, Google News readiness
 - Infrastructure: Docker Compose with PostgreSQL, Redis 7, RQ worker, Daphne ASGI
 - Tests: pytest with factory patterns, mocked external services, full integration test
-- Codebase: ~7,600 LOC Python + ~3,000 LOC TypeScript
+- Dependencies: feedparser 6.0.12 added in v2.1
+- Codebase: ~8,000+ LOC Python + ~3,500+ LOC TypeScript
 
 ## Constraints
 
@@ -114,6 +117,12 @@ Paste a URL, get a comprehensive scraping report card — what's allowed, what's
 | extruct for structured data extraction | Extracts JSON-LD, OpenGraph, Microdata from HTML in one pass | ✓ Good — comprehensive format coverage |
 | Plain HTML form POST for URL submission | Standard form POST to /submit, redirect handled as SPA transition | ✓ Good — simple, reliable, works with CSRF |
 | Article freshness TTL separate from publisher | Articles may need re-checking more frequently than publisher metadata | ✓ Good — flexible caching granularity |
+| Google News heuristic signals (not binary) | No public API for Google News inclusion; signals give honest assessment | ✓ Good — 4-tier readiness avoids false promises |
+| CC step non-critical with graceful error handling | External API shouldn't block pipeline; "unavailable" is acceptable | ✓ Good — pipeline never fails on CC timeout |
+| RSS dates preferred over sitemap lastmod | RSS dates are publication dates; sitemap lastmod may reflect edits | ✓ Good — more accurate frequency estimation |
+| feedparser as only new dependency | Minimize dependency footprint; feedparser is mature and focused | ✓ Good — single addition for v2.1 |
+| CC CDX endpoint hardcoded to latest crawl | Simplest approach; can parameterize later if needed | — Pending review |
+| String search for xmlns:news detection | Faster than XML namespace parsing; sufficient for detection | ✓ Good — simple and reliable |
 
 ---
-*Last updated: 2026-02-17 after v2.1 milestone start*
+*Last updated: 2026-02-18 after v2.1 milestone complete*

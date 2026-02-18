@@ -4,6 +4,7 @@ import json
 from datetime import timedelta
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 from django.utils import timezone
 
@@ -313,6 +314,99 @@ class TestRunAiBotBlockingStep:
 
 
 # ---------------------------------------------------------------------------
+# TestRunCCStep
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestRunCCStep:
+    def _make_mock_httpx_get(self, responses):
+        """Create a mock httpx.get that returns different responses based on URL params."""
+        call_count = [0]
+
+        def mock_get(url, timeout=None):
+            idx = call_count[0]
+            call_count[0] += 1
+            resp_cfg = responses[idx] if idx < len(responses) else responses[-1]
+
+            if "raise" in resp_cfg:
+                raise resp_cfg["raise"]
+
+            mock_resp = MagicMock()
+            mock_resp.text = resp_cfg["text"]
+            mock_resp.json = lambda: json.loads(resp_cfg["text"])
+            mock_resp.raise_for_status = MagicMock()
+            return mock_resp
+
+        return mock_get
+
+    def test_cc_step_domain_found(self, monkeypatch):
+        """CC step returns in_index=True with page_count and latest_crawl when domain found."""
+        from publishers.pipeline.steps import run_cc_step
+
+        publisher = PublisherFactory(domain="example.com")
+
+        mock_get = self._make_mock_httpx_get([
+            {"text": '{"pages": 5, "pageSize": 5, "blocks": 15}'},
+            {"text": '{"timestamp": "20260115120000"}'},
+        ])
+        monkeypatch.setattr("publishers.pipeline.steps.httpx.get", mock_get)
+
+        result = run_cc_step(publisher)
+        assert result["in_index"] is True
+        assert result["page_count"] == 45000
+        assert result["latest_crawl"] == "2026-01"
+        assert result["available"] is True
+        assert result["error"] is None
+
+    def test_cc_step_domain_not_found(self, monkeypatch):
+        """CC step returns in_index=False when domain has zero pages."""
+        from publishers.pipeline.steps import run_cc_step
+
+        publisher = PublisherFactory(domain="unknown-site.com")
+
+        mock_get = self._make_mock_httpx_get([
+            {"text": '{"pages": 0, "pageSize": 0, "blocks": 0}'},
+        ])
+        monkeypatch.setattr("publishers.pipeline.steps.httpx.get", mock_get)
+
+        result = run_cc_step(publisher)
+        assert result["in_index"] is False
+        assert result["page_count"] == 0
+        assert result["available"] is True
+
+    def test_cc_step_api_timeout(self, monkeypatch):
+        """CC step returns available=False on timeout without crashing."""
+        from publishers.pipeline.steps import run_cc_step
+
+        publisher = PublisherFactory(domain="slow-site.com")
+
+        mock_get = self._make_mock_httpx_get([
+            {"raise": httpx.TimeoutException("timeout")},
+        ])
+        monkeypatch.setattr("publishers.pipeline.steps.httpx.get", mock_get)
+
+        result = run_cc_step(publisher)
+        assert result["available"] is False
+        assert "timeout" in result["error"]
+
+    def test_cc_step_malformed_response(self, monkeypatch):
+        """CC step returns available=False on non-JSON response."""
+        from publishers.pipeline.steps import run_cc_step
+
+        publisher = PublisherFactory(domain="bad-api.com")
+
+        mock_get = self._make_mock_httpx_get([
+            {"text": "this is not json"},
+        ])
+        monkeypatch.setattr("publishers.pipeline.steps.httpx.get", mock_get)
+
+        result = run_cc_step(publisher)
+        assert result["available"] is False
+        assert isinstance(result["error"], str)
+
+
+# ---------------------------------------------------------------------------
 # TestRunPipeline
 # ---------------------------------------------------------------------------
 
@@ -385,6 +479,17 @@ class TestRunPipeline:
             },
         )
         monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_cc_step",
+            lambda pub: {
+                "available": True,
+                "in_index": True,
+                "page_count": 45000,
+                "latest_crawl": "2026-01",
+                "collection": "CC-MAIN-2026-04",
+                "error": None,
+            },
+        )
+        monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_publisher_details_step",
             lambda pub, html: {
                 "found": False,
@@ -422,6 +527,17 @@ class TestRunPipeline:
         job.refresh_from_db()
         assert job.status == "completed"
 
+        # Check CC step results saved
+        assert job.cc_result["in_index"] is True
+        assert job.cc_result["page_count"] == 45000
+
+        # Check publisher flat fields updated
+        publisher = job.publisher
+        publisher.refresh_from_db()
+        assert publisher.cc_in_index is True
+        assert publisher.cc_page_count == 45000
+        assert publisher.cc_last_crawl == "2026-01"
+
         # Check that all steps and pipeline completion were signaled
         step_names = [s for s, _ in events_published]
         assert "waf" in step_names
@@ -432,6 +548,7 @@ class TestRunPipeline:
         assert "sitemap" in step_names
         assert "rss" in step_names
         assert "rsl" in step_names
+        assert "cc" in step_names
         assert "publisher_details" in step_names
         assert "article_extraction" in step_names
         assert "paywall_detection" in step_names
@@ -464,6 +581,7 @@ class TestRunPipeline:
             rsl_result={"rsl_detected": False},
             ai_bot_result={"bots": {}},
             metadata_result={"organization": None},
+            cc_result={"available": True, "in_index": True, "page_count": 45000, "latest_crawl": "2026-01", "collection": "CC-MAIN-2026-04", "error": None},
         )
 
         # Create a prior ArticleMetadata so article steps are also skipped
@@ -514,6 +632,7 @@ class TestRunPipeline:
         assert ("sitemap", "skipped") in events_published
         assert ("rss", "skipped") in events_published
         assert ("rsl", "skipped") in events_published
+        assert ("cc", "skipped") in events_published
         assert ("publisher_details", "skipped") in events_published
         assert ("article_extraction", "skipped") in events_published
         assert ("paywall_detection", "skipped") in events_published
@@ -528,6 +647,7 @@ class TestRunPipeline:
         assert job.sitemap_result == prior_job.sitemap_result
         assert job.rss_result == prior_job.rss_result
         assert job.rsl_result == prior_job.rsl_result
+        assert job.cc_result == prior_job.cc_result
 
     def test_pipeline_sets_failed_on_exception(self, monkeypatch):
         """Pipeline sets job status to failed on unhandled exception."""
@@ -625,6 +745,17 @@ class TestRunPipeline:
             },
         )
         monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_cc_step",
+            lambda pub: {
+                "available": True,
+                "in_index": True,
+                "page_count": 45000,
+                "latest_crawl": "2026-01",
+                "collection": "CC-MAIN-2026-04",
+                "error": None,
+            },
+        )
+        monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_publisher_details_step",
             lambda pub, html: {
                 "found": True,
@@ -672,6 +803,8 @@ class TestRunPipeline:
         ]
         assert job.rss_result["count"] == 1
         assert job.rsl_result["rsl_detected"] is True
+        assert job.cc_result["in_index"] is True
+        assert job.cc_result["page_count"] == 45000
         assert job.metadata_result["found"] is True
         assert job.metadata_result["organization"]["name"] == "Example News"
 
@@ -736,6 +869,10 @@ class TestRunPipeline:
                 "indicators": [],
                 "count": 0,
             },
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_cc_step",
+            lambda pub: {"available": True, "in_index": False, "page_count": 0, "latest_crawl": None, "collection": "CC-MAIN-2026-04", "error": None},
         )
         monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_publisher_details_step",
@@ -832,6 +969,10 @@ class TestRunPipeline:
             },
         )
         monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_cc_step",
+            lambda pub: {"available": True, "in_index": False, "page_count": 0, "latest_crawl": None, "collection": "CC-MAIN-2026-04", "error": None},
+        )
+        monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_publisher_details_step",
             lambda pub, html: {
                 "found": False,
@@ -924,6 +1065,10 @@ class TestRunPipeline:
             },
         )
         monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_cc_step",
+            lambda pub: {"available": True, "in_index": False, "page_count": 0, "latest_crawl": None, "collection": "CC-MAIN-2026-04", "error": None},
+        )
+        monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_publisher_details_step",
             lambda pub, html: {
                 "found": True,
@@ -1014,6 +1159,10 @@ class TestRunPipeline:
             },
         )
         monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_cc_step",
+            lambda pub: {"available": True, "in_index": False, "page_count": 0, "latest_crawl": None, "collection": "CC-MAIN-2026-04", "error": None},
+        )
+        monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_publisher_details_step",
             lambda pub, html: {
                 "found": True,
@@ -1089,6 +1238,10 @@ class TestRunPipeline:
         monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_rsl_step",
             lambda pub, robots, html, headers=None: {"rsl_detected": False, "indicators": [], "count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_cc_step",
+            lambda pub: {"available": True, "in_index": False, "page_count": 0, "latest_crawl": None, "collection": "CC-MAIN-2026-04", "error": None},
         )
         monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_publisher_details_step",
@@ -1205,6 +1358,10 @@ class TestRunPipeline:
             lambda pub, robots, html, headers=None: {"rsl_detected": False, "indicators": [], "count": 0},
         )
         monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_cc_step",
+            lambda pub: {"available": True, "in_index": False, "page_count": 0, "latest_crawl": None, "collection": "CC-MAIN-2026-04", "error": None},
+        )
+        monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_publisher_details_step",
             lambda pub, html: {"found": False, "source": None, "score": 0, "organization": None, "candidate_count": 0},
         )
@@ -1288,6 +1445,10 @@ class TestRunPipeline:
         monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_rsl_step",
             lambda pub, robots, html, headers=None: {"rsl_detected": False, "indicators": [], "count": 0},
+        )
+        monkeypatch.setattr(
+            "publishers.pipeline.supervisor.run_cc_step",
+            lambda pub: {"available": True, "in_index": False, "page_count": 0, "latest_crawl": None, "collection": "CC-MAIN-2026-04", "error": None},
         )
         monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_publisher_details_step",
@@ -2310,3 +2471,395 @@ class TestRunMetadataProfileStep:
         )
         assert result["summary"] == ""
         assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# TestSitemapAnalysisStep
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestSitemapAnalysisStep:
+    def test_no_sitemaps_returns_empty(self):
+        """Publisher with no sitemap_urls returns empty result."""
+        from publishers.pipeline.steps import run_sitemap_analysis_step
+
+        publisher = PublisherFactory(sitemap_urls=[])
+        result = run_sitemap_analysis_step(publisher)
+        assert result["has_news_sitemap"] is False
+        assert result["sitemaps_checked"] == 0
+        assert result["lastmod_dates"] == []
+
+    def test_detects_news_namespace(self, monkeypatch):
+        """Detects xmlns:news in a regular sitemap."""
+        from publishers.pipeline import steps
+
+        news_xml = (
+            '<?xml version="1.0"?>'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"'
+            ' xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">'
+            "<url><loc>https://example.com/article1</loc></url>"
+            "</urlset>"
+        )
+        mock_result = FetchResult(
+            html=news_xml,
+            status_code=200,
+            strategy_used="direct",
+            url="https://example.com/sitemap.xml",
+        )
+        monkeypatch.setattr(
+            steps._fetch_manager, "fetch", lambda url, publisher=None: mock_result
+        )
+
+        publisher = PublisherFactory(
+            sitemap_urls=["https://example.com/sitemap.xml"]
+        )
+        result = steps.run_sitemap_analysis_step(publisher)
+        assert result["has_news_sitemap"] is True
+        assert result["news_sitemap_url"] == "https://example.com/sitemap.xml"
+
+    def test_detects_news_in_sitemap_index_child(self, monkeypatch):
+        """Detects xmlns:news in a child sitemap linked from a sitemap index."""
+        from publishers.pipeline import steps
+
+        index_xml = (
+            '<?xml version="1.0"?>'
+            '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            "<sitemap><loc>https://example.com/sitemap-news.xml</loc></sitemap>"
+            "<sitemap><loc>https://example.com/sitemap-posts.xml</loc></sitemap>"
+            "</sitemapindex>"
+        )
+        child_news_xml = (
+            '<?xml version="1.0"?>'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"'
+            ' xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">'
+            "<url><loc>https://example.com/news1</loc></url>"
+            "</urlset>"
+        )
+
+        call_count = {"n": 0}
+
+        def mock_fetch(url, publisher=None):
+            call_count["n"] += 1
+            if "sitemap-news" in url:
+                return FetchResult(
+                    html=child_news_xml, status_code=200, strategy_used="direct", url=url
+                )
+            if "sitemapindex" not in url and call_count["n"] == 1:
+                # First call returns the index
+                return FetchResult(
+                    html=index_xml, status_code=200, strategy_used="direct", url=url
+                )
+            return FetchResult(
+                html=index_xml, status_code=200, strategy_used="direct", url=url
+            )
+
+        monkeypatch.setattr(steps._fetch_manager, "fetch", mock_fetch)
+
+        publisher = PublisherFactory(
+            sitemap_urls=["https://example.com/sitemap_index.xml"]
+        )
+        result = steps.run_sitemap_analysis_step(publisher)
+        assert result["has_news_sitemap"] is True
+        assert result["sitemaps_checked"] >= 2
+
+    def test_extracts_lastmod_dates(self, monkeypatch):
+        """Extracts lastmod dates from a regular sitemap."""
+        from publishers.pipeline import steps
+
+        sitemap_xml = (
+            '<?xml version="1.0"?>'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            "<url><loc>https://example.com/a</loc><lastmod>2026-02-15</lastmod></url>"
+            "<url><loc>https://example.com/b</loc><lastmod>2026-02-14</lastmod></url>"
+            "<url><loc>https://example.com/c</loc><lastmod>2026-02-13</lastmod></url>"
+            "</urlset>"
+        )
+        mock_result = FetchResult(
+            html=sitemap_xml, status_code=200, strategy_used="direct", url="https://example.com/sitemap.xml"
+        )
+        monkeypatch.setattr(
+            steps._fetch_manager, "fetch", lambda url, publisher=None: mock_result
+        )
+
+        publisher = PublisherFactory(
+            sitemap_urls=["https://example.com/sitemap.xml"]
+        )
+        result = steps.run_sitemap_analysis_step(publisher)
+        assert len(result["lastmod_dates"]) == 3
+        assert "2026-02-15" in result["lastmod_dates"]
+
+    def test_fetch_error_continues(self, monkeypatch):
+        """Fetch error on first URL doesn't prevent second URL from being checked."""
+        from publishers.pipeline import steps
+
+        sitemap_xml = (
+            '<?xml version="1.0"?>'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            "<url><loc>https://example.com/a</loc></url>"
+            "</urlset>"
+        )
+
+        call_count = {"n": 0}
+
+        def mock_fetch(url, publisher=None):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise Exception("Network error")
+            return FetchResult(
+                html=sitemap_xml, status_code=200, strategy_used="direct", url=url
+            )
+
+        monkeypatch.setattr(steps._fetch_manager, "fetch", mock_fetch)
+
+        publisher = PublisherFactory(
+            sitemap_urls=[
+                "https://example.com/sitemap1.xml",
+                "https://example.com/sitemap2.xml",
+            ]
+        )
+        result = steps.run_sitemap_analysis_step(publisher)
+        assert result["sitemaps_checked"] == 1
+
+
+# ---------------------------------------------------------------------------
+# TestFrequencyStep
+# ---------------------------------------------------------------------------
+
+
+def _build_rss_xml(num_entries: int, start_date: str, interval_hours: float) -> str:
+    """Build minimal RSS XML with num_entries items starting from start_date."""
+    from datetime import datetime, timedelta
+
+    base = datetime(2026, 2, 17, 12, 0, 0)
+    items = []
+    for i in range(num_entries):
+        dt = base - timedelta(hours=interval_hours * i)
+        pub_date = dt.strftime("%a, %d %b %Y %H:%M:%S GMT")
+        items.append(f"<item><pubDate>{pub_date}</pubDate></item>")
+
+    return (
+        '<?xml version="1.0"?>'
+        '<rss version="2.0"><channel>'
+        + "".join(items)
+        + "</channel></rss>"
+    )
+
+
+@pytest.mark.django_db
+class TestFrequencyStep:
+    def test_rss_frequency_high_confidence(self, monkeypatch):
+        """15 RSS entries over 14 days -> source=rss, confidence=high."""
+        from publishers.pipeline import steps
+
+        rss_xml = _build_rss_xml(15, "2026-02-17", interval_hours=24.0)
+
+        mock_resp = MagicMock()
+        mock_resp.text = rss_xml
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+
+        monkeypatch.setattr(steps.httpx, "get", lambda *a, **kw: mock_resp)
+
+        publisher = PublisherFactory(
+            rss_urls=["https://example.com/feed.xml"]
+        )
+        result = steps.run_frequency_step(publisher)
+        assert result["source"] == "rss"
+        assert result["confidence"] == "high"
+        assert result["sample_size"] == 15
+        assert "article" in result["frequency_label"]
+
+    def test_rss_fallback_to_sitemap_lastmod(self):
+        """No RSS -> falls back to sitemap lastmod dates."""
+        from publishers.pipeline.steps import run_frequency_step
+
+        lastmod_dates = [
+            f"2026-02-{17 - i:02d}T12:00:00Z" for i in range(10)
+        ]
+        sitemap_result = {"lastmod_dates": lastmod_dates}
+
+        publisher = PublisherFactory(rss_urls=[])
+        result = run_frequency_step(publisher, sitemap_analysis_result=sitemap_result)
+        assert result["source"] == "sitemap"
+        assert result["confidence"] == "high"
+
+    def test_no_rss_no_sitemap_returns_none(self):
+        """No RSS, no sitemap -> source=none, confidence=low."""
+        from publishers.pipeline.steps import run_frequency_step
+
+        publisher = PublisherFactory(rss_urls=[])
+        result = run_frequency_step(publisher, sitemap_analysis_result=None)
+        assert result["source"] == "none"
+        assert result["confidence"] == "low"
+        assert result["sample_size"] == 0
+
+    def test_low_confidence_few_samples(self, monkeypatch):
+        """3 RSS entries over 1 day -> confidence=low."""
+        from publishers.pipeline import steps
+
+        rss_xml = _build_rss_xml(3, "2026-02-17", interval_hours=12.0)
+
+        mock_resp = MagicMock()
+        mock_resp.text = rss_xml
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+
+        monkeypatch.setattr(steps.httpx, "get", lambda *a, **kw: mock_resp)
+
+        publisher = PublisherFactory(
+            rss_urls=["https://example.com/feed.xml"]
+        )
+        result = steps.run_frequency_step(publisher)
+        assert result["confidence"] == "low"
+
+    def test_medium_confidence(self, monkeypatch):
+        """6 RSS entries spanning 4 days -> confidence=medium."""
+        from publishers.pipeline import steps
+
+        # 6 entries, ~19.2 hours apart -> span ~4 days
+        rss_xml = _build_rss_xml(6, "2026-02-17", interval_hours=19.2)
+
+        mock_resp = MagicMock()
+        mock_resp.text = rss_xml
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+
+        monkeypatch.setattr(steps.httpx, "get", lambda *a, **kw: mock_resp)
+
+        publisher = PublisherFactory(
+            rss_urls=["https://example.com/feed.xml"]
+        )
+        result = steps.run_frequency_step(publisher)
+        assert result["confidence"] == "medium"
+
+    def test_format_frequency_label_daily(self):
+        """_format_frequency_label produces correct labels."""
+        from publishers.pipeline.steps import _format_frequency_label
+
+        assert _format_frequency_label(8) == "~3 articles/day"
+        assert _format_frequency_label(24) == "~1 article/day"
+        assert _format_frequency_label(72) == "~2 articles/week"
+        assert _format_frequency_label(720) == "~1 articles/month"
+
+
+# ---------------------------------------------------------------------------
+# TestExtractJsonldArticleFieldsType
+# ---------------------------------------------------------------------------
+
+
+class TestExtractJsonldArticleFieldsType:
+    """Tests for @type preservation in _extract_jsonld_article_fields."""
+
+    def test_preserves_news_article_type(self):
+        from publishers.pipeline.steps import _extract_jsonld_article_fields
+
+        result = _extract_jsonld_article_fields(
+            [{"@type": "NewsArticle", "headline": "Test"}]
+        )
+        assert result is not None
+        assert result["@type"] == "NewsArticle"
+
+    def test_preserves_article_type(self):
+        from publishers.pipeline.steps import _extract_jsonld_article_fields
+
+        result = _extract_jsonld_article_fields(
+            [{"@type": "Article", "headline": "Test"}]
+        )
+        assert result is not None
+        assert result["@type"] == "Article"
+
+    def test_existing_fields_still_extracted(self):
+        from publishers.pipeline.steps import _extract_jsonld_article_fields
+
+        result = _extract_jsonld_article_fields(
+            [
+                {
+                    "@type": "NewsArticle",
+                    "headline": "My Headline",
+                    "author": "Alice",
+                    "datePublished": "2026-01-01",
+                }
+            ]
+        )
+        assert result is not None
+        assert result["headline"] == "My Headline"
+        assert result["author"] == "Alice"
+        assert result["datePublished"] == "2026-01-01"
+
+
+# ---------------------------------------------------------------------------
+# TestGoogleNewsStep
+# ---------------------------------------------------------------------------
+
+
+class TestGoogleNewsStep:
+    """Tests for run_google_news_step aggregation function."""
+
+    def test_google_news_step_all_signals(self):
+        from publishers.pipeline.steps import run_google_news_step
+
+        result = run_google_news_step(
+            sitemap_analysis_result={"has_news_sitemap": True},
+            article_result={"jsonld_fields": {"@type": "NewsArticle", "headline": "X"}},
+            metadata_result={"organization": {"type": "NewsMediaOrganization", "name": "CNN"}},
+        )
+        assert result["readiness"] == "strong"
+        assert result["signal_count"] == 3
+        assert result["error"] is None
+
+    def test_google_news_step_two_signals(self):
+        from publishers.pipeline.steps import run_google_news_step
+
+        result = run_google_news_step(
+            sitemap_analysis_result={"has_news_sitemap": True},
+            article_result={"jsonld_fields": {"@type": "NewsArticle", "headline": "X"}},
+            metadata_result={"organization": {"type": "Organization", "name": "Org"}},
+        )
+        assert result["readiness"] == "moderate"
+        assert result["signal_count"] == 2
+
+    def test_google_news_step_one_signal(self):
+        from publishers.pipeline.steps import run_google_news_step
+
+        result = run_google_news_step(
+            sitemap_analysis_result={"has_news_sitemap": True},
+            article_result={"jsonld_fields": {"@type": "Article", "headline": "X"}},
+            metadata_result={"organization": {"type": "Organization", "name": "Org"}},
+        )
+        assert result["readiness"] == "minimal"
+        assert result["signal_count"] == 1
+
+    def test_google_news_step_no_signals(self):
+        from publishers.pipeline.steps import run_google_news_step
+
+        result = run_google_news_step(
+            sitemap_analysis_result={"has_news_sitemap": False},
+            article_result={"jsonld_fields": {"@type": "Article", "headline": "X"}},
+            metadata_result={"organization": {"type": "Organization", "name": "Org"}},
+        )
+        assert result["readiness"] == "none"
+        assert result["signal_count"] == 0
+
+    def test_google_news_step_none_inputs(self):
+        from publishers.pipeline.steps import run_google_news_step
+
+        result = run_google_news_step(
+            sitemap_analysis_result=None,
+            article_result=None,
+            metadata_result=None,
+        )
+        assert result["readiness"] == "none"
+        assert result["signal_count"] == 0
+        assert result["error"] is None
+
+    def test_google_news_step_news_article_subtypes(self):
+        from publishers.pipeline.steps import run_google_news_step
+
+        result = run_google_news_step(
+            sitemap_analysis_result={"has_news_sitemap": False},
+            article_result={"jsonld_fields": {"@type": "OpinionNewsArticle", "headline": "X"}},
+            metadata_result={"organization": {"type": "Organization", "name": "Org"}},
+        )
+        assert result["signals"]["has_news_article_schema"] is True
+        assert result["readiness"] == "minimal"

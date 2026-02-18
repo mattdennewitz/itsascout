@@ -13,12 +13,16 @@ from publishers.pipeline.steps import (
     ITSASCOUT_USER_AGENT,
     run_ai_bot_blocking_step,
     run_article_extraction_step,
+    run_cc_step,
+    run_frequency_step,
+    run_google_news_step,
     run_metadata_profile_step,
     run_paywall_detection_step,
     run_publisher_details_step,
     run_robots_step,
     run_rss_step,
     run_rsl_step,
+    run_sitemap_analysis_step,
     run_sitemap_step,
     run_tos_discovery_step,
     run_tos_evaluation_step,
@@ -101,7 +105,9 @@ def run_pipeline(job_id: str):
                 .values(
                     "waf_result", "tos_result", "robots_result",
                     "sitemap_result", "rss_result", "rsl_result",
-                    "ai_bot_result", "metadata_result",
+                    "ai_bot_result", "metadata_result", "cc_result",
+                    "sitemap_analysis_result", "frequency_result",
+                    "news_signals_result",
                 )
                 .first()
             )
@@ -114,6 +120,10 @@ def run_pipeline(job_id: str):
                 resolution_job.rsl_result = prior["rsl_result"]
                 resolution_job.ai_bot_result = prior["ai_bot_result"]
                 resolution_job.metadata_result = prior["metadata_result"]
+                resolution_job.cc_result = prior["cc_result"]
+                resolution_job.sitemap_analysis_result = prior["sitemap_analysis_result"]
+                resolution_job.frequency_result = prior["frequency_result"]
+                resolution_job.news_signals_result = prior["news_signals_result"]
 
                 # Re-check URL allowance for THIS specific URL against cached robots.txt
                 raw_text = (prior["robots_result"] or {}).get("raw_text")
@@ -129,7 +139,9 @@ def run_pipeline(job_id: str):
                 resolution_job.save(update_fields=[
                     "waf_result", "tos_result", "robots_result",
                     "sitemap_result", "rss_result", "rsl_result",
-                    "ai_bot_result", "metadata_result",
+                    "ai_bot_result", "metadata_result", "cc_result",
+                    "sitemap_analysis_result", "frequency_result",
+                    "news_signals_result",
                 ])
 
             publish_step_event(job_id, "waf", "skipped", {"reason": "fresh"})
@@ -144,6 +156,43 @@ def run_pipeline(job_id: str):
             publish_step_event(job_id, "sitemap", "skipped", {"reason": "fresh"})
             publish_step_event(job_id, "rss", "skipped", {"reason": "fresh"})
             publish_step_event(job_id, "rsl", "skipped", {"reason": "fresh"})
+            if resolution_job.cc_result:
+                publish_step_event(job_id, "cc", "skipped", {"reason": "fresh"})
+            else:
+                # Prior job predates CC step — run it now
+                publish_step_event(job_id, "cc", "started")
+                cc_result = run_cc_step(publisher)
+                resolution_job.cc_result = cc_result
+                resolution_job.save(update_fields=["cc_result"])
+                publish_step_event(job_id, "cc", "completed", cc_result)
+                publisher.cc_in_index = cc_result.get("in_index")
+                publisher.cc_page_count = cc_result.get("page_count")
+                publisher.cc_last_crawl = cc_result.get("latest_crawl") or ""
+                publisher.save(update_fields=["cc_in_index", "cc_page_count", "cc_last_crawl"])
+            if resolution_job.sitemap_analysis_result:
+                publish_step_event(job_id, "sitemap_analysis", "skipped", {"reason": "fresh"})
+            else:
+                # Prior job predates sitemap analysis step -- run it now
+                publish_step_event(job_id, "sitemap_analysis", "started")
+                sa_result = run_sitemap_analysis_step(publisher)
+                resolution_job.sitemap_analysis_result = sa_result
+                resolution_job.save(update_fields=["sitemap_analysis_result"])
+                publish_step_event(job_id, "sitemap_analysis", "completed", sa_result)
+                publisher.has_news_sitemap = sa_result.get("has_news_sitemap")
+                publisher.save(update_fields=["has_news_sitemap"])
+            if resolution_job.frequency_result:
+                publish_step_event(job_id, "frequency", "skipped", {"reason": "fresh"})
+            else:
+                # Prior job predates frequency step -- run it now
+                publish_step_event(job_id, "frequency", "started")
+                freq_result = run_frequency_step(publisher, resolution_job.sitemap_analysis_result)
+                resolution_job.frequency_result = freq_result
+                resolution_job.save(update_fields=["frequency_result"])
+                publish_step_event(job_id, "frequency", "completed", freq_result)
+                publisher.update_frequency = freq_result.get("frequency_label", "")
+                publisher.update_frequency_hours = freq_result.get("frequency_hours")
+                publisher.update_frequency_confidence = freq_result.get("confidence", "")
+                publisher.save(update_fields=["update_frequency", "update_frequency_hours", "update_frequency_confidence"])
             publish_step_event(job_id, "publisher_details", "skipped", {"reason": "fresh"})
         else:
             # Step 1: WAF check
@@ -249,6 +298,43 @@ def run_pipeline(job_id: str):
             publisher.rsl_detected = rsl_result.get("rsl_detected", False)
             publisher.save(update_fields=["rsl_detected"])
 
+            # Step: Common Crawl presence
+            publish_step_event(job_id, "cc", "started")
+            cc_result = run_cc_step(publisher)
+            resolution_job.cc_result = cc_result
+            resolution_job.save(update_fields=["cc_result"])
+            publish_step_event(job_id, "cc", "completed", cc_result)
+
+            # Update publisher flat fields
+            publisher.cc_in_index = cc_result.get("in_index")
+            publisher.cc_page_count = cc_result.get("page_count")
+            publisher.cc_last_crawl = cc_result.get("latest_crawl") or ""
+            publisher.save(update_fields=["cc_in_index", "cc_page_count", "cc_last_crawl"])
+
+            # Step: Sitemap analysis (news namespace detection)
+            publish_step_event(job_id, "sitemap_analysis", "started")
+            sitemap_analysis_result = run_sitemap_analysis_step(publisher)
+            resolution_job.sitemap_analysis_result = sitemap_analysis_result
+            resolution_job.save(update_fields=["sitemap_analysis_result"])
+            publish_step_event(job_id, "sitemap_analysis", "completed", sitemap_analysis_result)
+
+            # Update publisher flat fields
+            publisher.has_news_sitemap = sitemap_analysis_result.get("has_news_sitemap")
+            publisher.save(update_fields=["has_news_sitemap"])
+
+            # Step: Update frequency estimation
+            publish_step_event(job_id, "frequency", "started")
+            frequency_result = run_frequency_step(publisher, sitemap_analysis_result)
+            resolution_job.frequency_result = frequency_result
+            resolution_job.save(update_fields=["frequency_result"])
+            publish_step_event(job_id, "frequency", "completed", frequency_result)
+
+            # Update publisher flat fields
+            publisher.update_frequency = frequency_result.get("frequency_label", "")
+            publisher.update_frequency_hours = frequency_result.get("frequency_hours")
+            publisher.update_frequency_confidence = frequency_result.get("confidence", "")
+            publisher.save(update_fields=["update_frequency", "update_frequency_hours", "update_frequency_confidence"])
+
             # Step 8: Publisher details (structured data — already "started" at pipeline begin)
             details_result = run_publisher_details_step(publisher, homepage_html)
             resolution_job.metadata_result = details_result
@@ -347,6 +433,30 @@ def run_pipeline(job_id: str):
             if len(profile_result.get("summary", "")) > 50:
                 profile_summary_text += "..."
             publish_step_event(job_id, "metadata_profile", "completed", {**profile_result, "summary": profile_summary_text})
+
+        # Step: Google News readiness (non-critical aggregation)
+        publish_step_event(job_id, "google_news", "started")
+        try:
+            news_result = run_google_news_step(
+                sitemap_analysis_result=resolution_job.sitemap_analysis_result,
+                article_result=resolution_job.article_result,
+                metadata_result=resolution_job.metadata_result,
+            )
+        except Exception as exc:
+            logger.error(f"Google News step error for job {job_id}: {exc}")
+            news_result = {
+                "readiness": "",
+                "signals": {},
+                "signal_count": 0,
+                "error": str(exc),
+            }
+        resolution_job.news_signals_result = news_result
+        resolution_job.save(update_fields=["news_signals_result"])
+        publish_step_event(job_id, "google_news", "completed", news_result)
+
+        # Update publisher flat field
+        publisher.google_news_readiness = news_result.get("readiness", "")
+        publisher.save(update_fields=["google_news_readiness"])
 
         # Mark job complete
         resolution_job.status = "completed"

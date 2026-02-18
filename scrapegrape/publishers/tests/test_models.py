@@ -34,6 +34,17 @@ class TestPublisherModel:
         assert publisher.rsl_detected is None
         assert publisher.last_checked_at is None
 
+    def test_publisher_competitive_intelligence_defaults(self, publisher):
+        """New Phase 13 competitive intelligence fields have safe defaults."""
+        assert publisher.cc_in_index is None
+        assert publisher.cc_page_count is None
+        assert publisher.cc_last_crawl == ""
+        assert publisher.has_news_sitemap is None
+        assert publisher.google_news_readiness == ""
+        assert publisher.update_frequency == ""
+        assert publisher.update_frequency_hours is None
+        assert publisher.update_frequency_confidence == ""
+
 
 @pytest.mark.django_db
 class TestResolutionJobModel:
@@ -58,6 +69,13 @@ class TestResolutionJobModel:
         assert resolution_job.rss_result is None
         assert resolution_job.rsl_result is None
         assert resolution_job.metadata_result is None
+
+    def test_job_competitive_intelligence_results_null(self, resolution_job):
+        """New Phase 13 competitive intelligence result fields default to null."""
+        assert resolution_job.cc_result is None
+        assert resolution_job.sitemap_analysis_result is None
+        assert resolution_job.frequency_result is None
+        assert resolution_job.news_signals_result is None
 
     def test_job_publisher_relationship(self, resolution_job):
         assert resolution_job.publisher.resolution_jobs.count() == 1

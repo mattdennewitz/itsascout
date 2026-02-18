@@ -4,7 +4,7 @@
 
 - ✅ **v1.0 Inertia Refactor** -- Phases 1-5 (shipped 2026-02-13)
 - ✅ **v2.0 Core Workflow** -- Phases 6-11 (shipped 2026-02-17)
-- 📋 **v2.1 Competitive Intelligence** -- Phases 13-18 (planned)
+- ✅ **v2.1 Competitive Intelligence** -- Phases 13-18 (shipped 2026-02-18)
 
 *Phase 12 (Django Built-in Authentication) deferred -- not in any current milestone.*
 
@@ -33,118 +33,24 @@
 
 </details>
 
+<details>
+<summary>v2.1 Competitive Intelligence (Phases 13-18) -- SHIPPED 2026-02-18</summary>
+
+- [x] Phase 13: Data Foundation (1/1 plans) -- completed 2026-02-17
+- [x] Phase 14: Common Crawl Presence (1/1 plans) -- completed 2026-02-17
+- [x] Phase 15: Content Signals (2/2 plans) -- completed 2026-02-17
+- [x] Phase 16: Google News Readiness (2/2 plans) -- completed 2026-02-18
+- [x] Phase 17: Pipeline Integration (2/2 plans) -- completed 2026-02-18
+- [x] Phase 18: Competitive Intelligence UI (1/1 plans) -- completed 2026-02-18
+
+</details>
+
 ### Phase 12: Django Built-in Authentication (Deferred)
 
 **Goal:** Users can securely access their accounts
 **Depends on:** Phase 11
-**Status:** Deferred -- not in v2.1 scope
+**Status:** Deferred -- not in any current milestone
 **Plans:** TBD
-
----
-
-### v2.1 Competitive Intelligence (Phases 13-18)
-
-**Milestone Goal:** Report card shows competitive intelligence signals -- Common Crawl presence, Google News readiness, and publishing frequency -- giving publishers a complete picture of their scraping and discovery posture.
-
-- [ ] **Phase 13: Data Foundation** - Model fields and migration for all competitive intelligence data
-- [ ] **Phase 14: Common Crawl Presence** - Query CC CDX Index API for domain presence
-- [ ] **Phase 15: Content Signals** - Sitemap analysis for news namespace and update frequency estimation
-- [ ] **Phase 16: Google News Readiness** - Aggregate signals into readiness assessment
-- [ ] **Phase 17: Pipeline Integration** - TTL skip path, SSE progress, and end-to-end wiring
-- [ ] **Phase 18: Competitive Intelligence UI** - Report card section displaying all three signals
-
-## Phase Details
-
-### Phase 13: Data Foundation
-
-**Goal:** All competitive intelligence data has a home in the database before any steps produce it
-**Depends on:** Phase 11 (existing models)
-**Requirements:** PIPE-02
-**Success Criteria** (what must be TRUE):
-  1. Publisher model has fields for CC presence, news sitemap, Google News readiness, and update frequency
-  2. ResolutionJob model has JSONFields for cc_result, sitemap_analysis_result, frequency_result, and news_signals_result
-  3. Migration applies cleanly and existing data is unaffected (all new fields nullable)
-**Plans:** 1 plan
-
-Plans:
-- [ ] 13-01-PLAN.md -- Add competitive intelligence fields to Publisher and ResolutionJob, generate migration, add tests
-
-### Phase 14: Common Crawl Presence
-
-**Goal:** Users can see whether their publisher domain appears in Common Crawl and how extensively it has been crawled
-**Depends on:** Phase 13
-**Requirements:** CC-01, CC-02, CC-03, CC-04
-**Success Criteria** (what must be TRUE):
-  1. Pipeline queries the CC CDX Index API with domain wildcard match and reports presence
-  2. When present, the result includes estimated page count and latest crawl date
-  3. CC API failures or timeouts produce "data unavailable" -- never a pipeline failure
-  4. CC step emits SSE start/complete events and saves results to ResolutionJob
-**Plans:** TBD
-
-Plans:
-- [ ] 14-01: TBD (run /gsd:plan-phase 14 to break down)
-
-### Phase 15: Content Signals
-
-**Goal:** Users can see news sitemap presence and estimated publishing frequency for their publisher
-**Depends on:** Phase 13, existing sitemap discovery (Phase 9), existing RSS discovery (Phase 9)
-**Requirements:** GN-02, UF-01, UF-02, UF-03, UF-04
-**Success Criteria** (what must be TRUE):
-  1. Sitemap analysis step fetches discovered sitemaps and detects `xmlns:news` XML namespace
-  2. Update frequency step parses RSS feed dates via feedparser and computes publishing interval
-  3. When RSS is unavailable, frequency falls back to sitemap lastmod dates
-  4. Frequency estimate includes confidence indicator based on sample size and date span
-  5. Both steps emit SSE events and save results to ResolutionJob
-**Plans:** TBD
-
-Plans:
-- [ ] 15-01: TBD (run /gsd:plan-phase 15 to break down)
-
-### Phase 16: Google News Readiness
-
-**Goal:** Users can see an honest assessment of their publisher's Google News optimization signals
-**Depends on:** Phase 15 (sitemap analysis provides news sitemap signal), existing article extraction (Phase 10)
-**Requirements:** GN-01, GN-03, GN-04
-**Success Criteria** (what must be TRUE):
-  1. Aggregation step combines news sitemap presence, NewsArticle schema, and NewsMediaOrganization schema
-  2. Signals produce a readiness level (strong / moderate / minimal / none) -- never a binary "in/not in" answer
-  3. Step runs after article extraction (needs schema type data) with no new HTTP requests
-  4. Step emits SSE events and saves results to ResolutionJob
-**Plans:** TBD
-
-Plans:
-- [ ] 16-01: TBD (run /gsd:plan-phase 16 to break down)
-
-### Phase 17: Pipeline Integration
-
-**Goal:** All new steps work correctly within the existing pipeline lifecycle -- cached results, progress tracking, and supervisor orchestration
-**Depends on:** Phases 14, 15, 16 (all steps must exist)
-**Requirements:** PIPE-01, PIPE-03, PIPE-04
-**Success Criteria** (what must be TRUE):
-  1. Publisher freshness TTL skip path copies all new result fields correctly for cached analyses
-  2. SSE progress stream includes proper step names for all new steps (started/completed/skipped events)
-  3. Full pipeline runs end-to-end with all new steps in correct order without exceeding timeout
-  4. Cached (skipped) pipeline runs emit skip events for new steps and display prior results
-**Plans:** TBD
-
-Plans:
-- [ ] 17-01: TBD (run /gsd:plan-phase 17 to break down)
-
-### Phase 18: Competitive Intelligence UI
-
-**Goal:** Users see a Competitive Intelligence section in the report card displaying all three signals clearly
-**Depends on:** Phase 17 (all data flowing correctly)
-**Requirements:** UI-01, UI-02, UI-03, UI-04
-**Success Criteria** (what must be TRUE):
-  1. Report card has a Competitive Intelligence section showing CC presence, Google News readiness, and update frequency
-  2. CC presence shows page count and crawl date when available, graceful "unavailable" message otherwise
-  3. Google News readiness shows individual signal breakdown with a readiness level badge
-  4. Update frequency shows estimated rate with confidence indicator
-  5. All three sub-sections handle missing/unavailable data gracefully (no blank cards, no errors)
-**Plans:** TBD
-
-Plans:
-- [ ] 18-01: TBD (run /gsd:plan-phase 18 to break down)
 
 ## Progress
 
@@ -165,18 +71,19 @@ Phases execute in numeric order. Phase 12 is deferred (skipped).
 | 10. Article Metadata | v2.0 | 2/2 | Complete | 2026-02-17 |
 | 11. Report Card UI | v2.0 | 3/3 | Complete | 2026-02-17 |
 | 12. Authentication | -- | 0/0 | Deferred | -- |
-| 13. Data Foundation | v2.1 | 0/TBD | Not started | - |
-| 14. Common Crawl Presence | v2.1 | 0/TBD | Not started | - |
-| 15. Content Signals | v2.1 | 0/TBD | Not started | - |
-| 16. Google News Readiness | v2.1 | 0/TBD | Not started | - |
-| 17. Pipeline Integration | v2.1 | 0/TBD | Not started | - |
-| 18. Competitive Intelligence UI | v2.1 | 0/TBD | Not started | - |
+| 13. Data Foundation | v2.1 | 1/1 | Complete | 2026-02-17 |
+| 14. Common Crawl Presence | v2.1 | 1/1 | Complete | 2026-02-17 |
+| 15. Content Signals | v2.1 | 2/2 | Complete | 2026-02-17 |
+| 16. Google News Readiness | v2.1 | 2/2 | Complete | 2026-02-18 |
+| 17. Pipeline Integration | v2.1 | 2/2 | Complete | 2026-02-18 |
+| 18. Competitive Intelligence UI | v2.1 | 1/1 | Complete | 2026-02-18 |
 
 ---
 
 *Roadmap created: 2026-02-12*
 *v1.0 shipped: 2026-02-13*
 *v2.0 shipped: 2026-02-17*
-*v2.1 roadmap added: 2026-02-17*
+*v2.1 shipped: 2026-02-18*
 *Full v1.0 details: .planning/milestones/v1.0-ROADMAP.md*
 *Full v2.0 details: .planning/milestones/v2.0-ROADMAP.md*
+*Full v2.1 details: .planning/milestones/v2.1-ROADMAP.md*

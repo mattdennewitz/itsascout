@@ -9,10 +9,17 @@ from __future__ import annotations
 
 import json
 import re
+import xml.etree.ElementTree as ET
+from datetime import datetime as _datetime
+from datetime import timezone as dt_timezone
 from html.parser import HTMLParser
+from statistics import median
+from time import mktime
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin, urlparse
 
+import feedparser
+import httpx
 from django.conf import settings
 from django.utils import timezone
 from loguru import logger
@@ -406,6 +413,339 @@ def run_rsl_step(
 
 
 # ---------------------------------------------------------------------------
+# Common Crawl presence detection step
+# ---------------------------------------------------------------------------
+
+CC_CDX_ENDPOINT = "https://index.commoncrawl.org/CC-MAIN-2026-04-index"
+CC_COLLECTION = "CC-MAIN-2026-04"
+
+
+def run_cc_step(publisher: Publisher) -> dict:
+    """Query Common Crawl CDX Index API for publisher domain presence."""
+    try:
+        # Request 1: Presence check with page count
+        presence_url = (
+            f"{CC_CDX_ENDPOINT}?url=*.{publisher.domain}"
+            f"&output=json&showNumPages=true"
+        )
+        resp = httpx.get(presence_url, timeout=15.0)
+        resp.raise_for_status()
+        data = resp.json()
+
+        pages = data.get("pages", 0)
+        blocks = data.get("blocks", 0)
+
+        if pages == 0:
+            return {
+                "available": True,
+                "in_index": False,
+                "page_count": 0,
+                "latest_crawl": None,
+                "collection": CC_COLLECTION,
+                "error": None,
+            }
+
+        # Estimate page count from blocks
+        estimated_count = blocks * 3000
+
+        # Request 2: Latest timestamp
+        latest_url = (
+            f"{CC_CDX_ENDPOINT}?url=*.{publisher.domain}"
+            f"&output=json&fl=timestamp&limit=1&sort=desc"
+        )
+        ts_resp = httpx.get(latest_url, timeout=15.0)
+        ts_resp.raise_for_status()
+
+        # Parse first line of newline-delimited JSON
+        first_line = ts_resp.text.strip().split("\n")[0]
+        ts_data = json.loads(first_line)
+        raw_ts = ts_data.get("timestamp", "")
+        latest_crawl = f"{raw_ts[:4]}-{raw_ts[4:6]}" if len(raw_ts) >= 6 else None
+
+        return {
+            "available": True,
+            "in_index": True,
+            "page_count": estimated_count,
+            "latest_crawl": latest_crawl,
+            "collection": CC_COLLECTION,
+            "error": None,
+        }
+
+    except Exception as exc:
+        logger.error(f"CC step error for {publisher.domain}: {exc}")
+        return {
+            "available": False,
+            "in_index": None,
+            "page_count": None,
+            "latest_crawl": None,
+            "collection": CC_COLLECTION,
+            "error": str(exc),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Sitemap analysis helpers
+# ---------------------------------------------------------------------------
+
+
+def _extract_sitemap_locs(xml_text: str, limit: int = 2) -> list[str]:
+    """Extract <loc> URLs from a sitemap index, limited to first N entries."""
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return []
+
+    ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+    locs: list[str] = []
+    for sitemap in root.findall("sm:sitemap/sm:loc", ns):
+        if sitemap.text:
+            locs.append(sitemap.text.strip())
+            if len(locs) >= limit:
+                break
+    return locs
+
+
+def _extract_lastmod_dates(xml_text: str, limit: int = 50) -> list[str]:
+    """Extract <lastmod> date strings from a sitemap XML."""
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return []
+
+    ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+    dates: list[str] = []
+    for url_elem in root.findall("sm:url/sm:lastmod", ns):
+        if url_elem.text:
+            dates.append(url_elem.text.strip())
+            if len(dates) >= limit:
+                break
+    return dates
+
+
+# ---------------------------------------------------------------------------
+# Sitemap analysis step
+# ---------------------------------------------------------------------------
+
+
+def run_sitemap_analysis_step(publisher: Publisher) -> dict:
+    """Fetch discovered sitemaps and detect xmlns:news XML namespace."""
+    sitemap_urls = publisher.sitemap_urls or []
+    if not sitemap_urls:
+        return {
+            "has_news_sitemap": False,
+            "news_sitemap_url": None,
+            "sitemaps_checked": 0,
+            "lastmod_dates": [],
+            "error": None,
+        }
+
+    has_news = False
+    news_url: str | None = None
+    lastmod_dates: list[str] = []
+    checked = 0
+
+    for url in sitemap_urls[:3]:  # Limit to first 3 sitemaps
+        try:
+            result = _fetch_manager.fetch(url, publisher=publisher)
+            xml_text = result.html
+            checked += 1
+
+            # Check for news namespace (string search is fastest)
+            if "xmlns:news" in xml_text or "schemas/sitemap-news" in xml_text:
+                has_news = True
+                if not news_url:
+                    news_url = url
+
+            # Handle sitemap index: check child sitemaps
+            if "<sitemapindex" in xml_text:
+                child_urls = _extract_sitemap_locs(xml_text, limit=2)
+                # Prioritize URLs containing "news" in the name
+                child_urls.sort(key=lambda u: (0 if "news" in u.lower() else 1))
+                for child_url in child_urls:
+                    try:
+                        child_result = _fetch_manager.fetch(
+                            child_url, publisher=publisher
+                        )
+                        child_xml = child_result.html
+                        checked += 1
+                        if (
+                            "xmlns:news" in child_xml
+                            or "schemas/sitemap-news" in child_xml
+                        ):
+                            has_news = True
+                            if not news_url:
+                                news_url = child_url
+                        lastmod_dates.extend(
+                            _extract_lastmod_dates(child_xml, limit=50)
+                        )
+                    except Exception:
+                        continue
+            else:
+                lastmod_dates.extend(_extract_lastmod_dates(xml_text, limit=50))
+
+        except Exception as exc:
+            logger.error(f"Sitemap analysis error for {url}: {exc}")
+            continue
+
+    return {
+        "has_news_sitemap": has_news,
+        "news_sitemap_url": news_url,
+        "sitemaps_checked": checked,
+        "lastmod_dates": sorted(lastmod_dates, reverse=True)[:50],
+        "error": None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Update frequency helpers
+# ---------------------------------------------------------------------------
+
+
+def _extract_rss_dates(feed_url: str) -> list[_datetime]:
+    """Fetch RSS feed and extract publication dates as UTC datetimes."""
+    try:
+        resp = httpx.get(feed_url, timeout=10.0, follow_redirects=True)
+        resp.raise_for_status()
+        feed = feedparser.parse(resp.text)
+    except Exception:
+        return []
+
+    dates: list[_datetime] = []
+    for entry in feed.entries:
+        parsed = entry.get("published_parsed") or entry.get("updated_parsed")
+        if parsed:
+            try:
+                dt = _datetime.fromtimestamp(mktime(parsed), tz=dt_timezone.utc)
+                dates.append(dt)
+            except (ValueError, OverflowError):
+                continue
+    return sorted(dates, reverse=True)
+
+
+def _parse_lastmod_dates(date_strings: list[str]) -> list[_datetime]:
+    """Parse ISO-format date strings into UTC datetimes."""
+    dates: list[_datetime] = []
+    for s in date_strings:
+        try:
+            dt = _datetime.fromisoformat(s.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=dt_timezone.utc)
+            dates.append(dt)
+        except (ValueError, TypeError):
+            continue
+    return sorted(dates, reverse=True)
+
+
+def _format_frequency_label(hours_between: float) -> str:
+    """Convert hours between posts to human-readable label."""
+    if hours_between <= 0:
+        return "~multiple/hour"
+    posts_per_day = 24 / hours_between
+    if posts_per_day >= 2:
+        return f"~{round(posts_per_day)} articles/day"
+    elif posts_per_day >= 1:
+        return "~1 article/day"
+    elif posts_per_day >= 1 / 7:
+        posts_per_week = round(posts_per_day * 7)
+        return f"~{posts_per_week} articles/week"
+    else:
+        posts_per_month = round(posts_per_day * 30)
+        if posts_per_month >= 1:
+            return f"~{posts_per_month} articles/month"
+        return "< 1 article/month"
+
+
+def _compute_frequency(dates: list[_datetime], source: str) -> dict:
+    """Compute frequency stats from sorted datetime list."""
+    if len(dates) < 2:
+        return {
+            "source": source,
+            "frequency_label": "",
+            "frequency_hours": None,
+            "confidence": "low",
+            "sample_size": len(dates),
+            "date_span_days": 0,
+            "error": None,
+        }
+
+    # Compute intervals between consecutive dates
+    intervals_hours: list[float] = []
+    for i in range(len(dates) - 1):
+        delta = abs((dates[i] - dates[i + 1]).total_seconds()) / 3600
+        if delta > 0:
+            intervals_hours.append(delta)
+
+    if not intervals_hours:
+        return {
+            "source": source,
+            "frequency_label": "",
+            "frequency_hours": None,
+            "confidence": "low",
+            "sample_size": len(dates),
+            "date_span_days": 0,
+            "error": None,
+        }
+
+    med_hours = median(intervals_hours)
+    span_days = abs((dates[0] - dates[-1]).total_seconds()) / 86400
+
+    # Confidence based on sample size and date span
+    if len(dates) >= 10 and span_days >= 7:
+        confidence = "high"
+    elif len(dates) >= 5 and span_days >= 3:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    label = _format_frequency_label(med_hours)
+
+    return {
+        "source": source,
+        "frequency_label": label,
+        "frequency_hours": round(med_hours, 1),
+        "confidence": confidence,
+        "sample_size": len(dates),
+        "date_span_days": round(span_days, 1),
+        "error": None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Update frequency step
+# ---------------------------------------------------------------------------
+
+
+def run_frequency_step(
+    publisher: Publisher, sitemap_analysis_result: dict | None = None
+) -> dict:
+    """Estimate publishing frequency from RSS dates, falling back to sitemap lastmod."""
+    rss_urls = publisher.rss_urls or []
+
+    # Try RSS first
+    if rss_urls:
+        dates = _extract_rss_dates(rss_urls[0])
+        if len(dates) >= 2:
+            return _compute_frequency(dates, source="rss")
+
+    # Fallback to sitemap lastmod dates
+    lastmod_dates = (sitemap_analysis_result or {}).get("lastmod_dates", [])
+    if lastmod_dates:
+        parsed = _parse_lastmod_dates(lastmod_dates)
+        if len(parsed) >= 2:
+            return _compute_frequency(parsed, source="sitemap")
+
+    return {
+        "source": "none",
+        "frequency_label": "",
+        "frequency_hours": None,
+        "confidence": "low",
+        "sample_size": 0,
+        "date_span_days": 0,
+        "error": None,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Publisher details (structured data extraction) step
 # ---------------------------------------------------------------------------
 
@@ -731,6 +1071,11 @@ ARTICLE_TYPES = {
     "SocialMediaPosting", "WebPage", "CreativeWork",
 }
 
+NEWS_ARTICLE_TYPES = {
+    "NewsArticle", "OpinionNewsArticle", "AnalysisNewsArticle",
+    "ReportageNewsArticle", "ReviewNewsArticle",
+}
+
 KEY_FIELDS = [
     "headline", "author", "datePublished", "dateModified",
     "image", "description", "isAccessibleForFree",
@@ -759,6 +1104,13 @@ def _extract_jsonld_article_fields(jsonld_items: list) -> dict | None:
         types = _normalize_types(node)
         if any(t.split("/")[-1] in ARTICLE_TYPES for t in types):
             fields: dict = {}
+            # Preserve @type for downstream consumers (e.g., Google News readiness step)
+            matched_type = next(
+                (t.split("/")[-1] for t in types if t.split("/")[-1] in ARTICLE_TYPES),
+                None,
+            )
+            if matched_type:
+                fields["@type"] = matched_type
             for field in KEY_FIELDS:
                 val = node.get(field)
                 if val is not None:
@@ -1052,3 +1404,63 @@ def run_metadata_profile_step(extraction_result: dict, article_url: str) -> dict
     except Exception as exc:
         logger.error(f"Metadata profile step error for {article_url}: {exc}")
         return {"summary": "", "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Google News readiness aggregation step
+# ---------------------------------------------------------------------------
+
+
+def run_google_news_step(
+    sitemap_analysis_result: dict | None,
+    article_result: dict | None,
+    metadata_result: dict | None,
+) -> dict:
+    """Aggregate Google News readiness signals from existing pipeline data.
+
+    No HTTP requests -- pure aggregation of already-collected signals.
+    Combines three signals: news sitemap presence, NewsArticle schema type,
+    and NewsMediaOrganization schema type.
+    """
+    signals: dict = {}
+
+    # Signal 1: News sitemap
+    has_news_sitemap = bool(
+        (sitemap_analysis_result or {}).get("has_news_sitemap")
+    )
+    signals["has_news_sitemap"] = has_news_sitemap
+
+    # Signal 2: NewsArticle schema type on article
+    jsonld_fields = (article_result or {}).get("jsonld_fields") or {}
+    article_type = jsonld_fields.get("@type", "")
+    has_news_article = (
+        any(t in article_type for t in NEWS_ARTICLE_TYPES) if article_type else False
+    )
+    signals["has_news_article_schema"] = has_news_article
+    signals["article_schema_type"] = article_type
+
+    # Signal 3: NewsMediaOrganization schema on publisher
+    org = (metadata_result or {}).get("organization") or {}
+    org_type = org.get("type", "")
+    has_news_org = org_type == "NewsMediaOrganization"
+    signals["has_news_media_org"] = has_news_org
+    signals["org_schema_type"] = org_type
+
+    # Compute readiness level
+    signal_count = sum([has_news_sitemap, has_news_article, has_news_org])
+
+    if signal_count >= 3:
+        readiness = "strong"
+    elif signal_count == 2:
+        readiness = "moderate"
+    elif signal_count == 1:
+        readiness = "minimal"
+    else:
+        readiness = "none"
+
+    return {
+        "readiness": readiness,
+        "signals": signals,
+        "signal_count": signal_count,
+        "error": None,
+    }

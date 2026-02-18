@@ -2,51 +2,46 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-17)
+See: .planning/PROJECT.md (updated 2026-02-18)
 
 **Core value:** Paste a URL, get a comprehensive scraping report card with real-time progress as each check completes.
-**Current focus:** v2.1 Competitive Intelligence -- Phase 13 (Data Foundation) ready to plan.
+**Current focus:** Planning next milestone
 
 ## Current Position
 
-Phase: 13 of 18 (Data Foundation)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-02-17 -- v2.1 roadmap created (6 phases, 20 requirements mapped)
+Phase: None active -- all milestones complete
+Status: v2.1 Competitive Intelligence shipped 2026-02-18
+Last activity: 2026-02-18 -- v2.1 milestone archived
 
-Progress: [██████████████████░░░░░░░░░░░░] 63% (v1.0 + v2.0 shipped, v2.1 planned)
+Progress: v1.0 ✓ | v2.0 ✓ | v2.1 ✓
 
 ## Performance Metrics
 
-**v2.0 Velocity:**
-- Total plans completed: 13
-- Average duration: 3.1min
-- Total execution time: 0.67 hours
-- Timeline: 4 days (2026-02-14 to 2026-02-17)
+*v2.0 metrics archived in milestones/v2.0-ROADMAP.md*
+*v2.1 metrics archived in milestones/v2.1-ROADMAP.md*
 
-*Full v2.0 metrics archived in milestones/v2.0-ROADMAP.md*
+**v2.1 Summary:**
+- 6 phases, 9 plans
+- 2 days (2026-02-17 → 2026-02-18)
+- 46 files, +6,161 lines
 
 ## Accumulated Context
 
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.
-v2.0 decisions archived -- see PROJECT.md for full history.
-
-Recent decisions:
-- v2.1: Google News detection uses heuristic signals (readiness level), not binary inclusion
-- v2.1: CC step is non-critical with graceful error handling (never blocks pipeline)
-- v2.1: RSS dates preferred over sitemap lastmod for frequency estimation
-- v2.1: One new dependency only (feedparser 6.0.12)
+v2.0 and v2.1 decisions archived -- see PROJECT.md for full history.
 
 ### Pending Todos
 
-None yet.
+None.
 
 ### Roadmap Evolution
 
-- Phase 12 (Django Built-in Authentication) deferred -- not in v2.1 scope
-- Phases 13-18 added for v2.1 Competitive Intelligence milestone
+- Phase 12 (Django Built-in Authentication) deferred -- not in any current milestone
+- v1.0 shipped 2026-02-13 (Phases 1-5)
+- v2.0 shipped 2026-02-17 (Phases 6-11)
+- v2.1 shipped 2026-02-18 (Phases 13-18)
 
 ### Blockers/Concerns
 
@@ -54,6 +49,6 @@ None currently.
 
 ## Session Continuity
 
-Last session: 2026-02-17
-Stopped at: v2.1 roadmap created, ready to plan Phase 13
+Last session: 2026-02-18
+Stopped at: v2.1 milestone complete and archived. No active milestone.
 Resume file: None

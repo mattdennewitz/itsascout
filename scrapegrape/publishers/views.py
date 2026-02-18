@@ -186,6 +186,8 @@ def job_show(request, job_id):
     result_fields = [
         "waf_result", "tos_result", "robots_result", "sitemap_result",
         "rss_result", "rsl_result", "ai_bot_result", "metadata_result",
+        "cc_result", "sitemap_analysis_result", "frequency_result",
+        "news_signals_result",
     ]
     needs_fallback = any(getattr(job, f) is None for f in result_fields)
 
@@ -223,6 +225,10 @@ def job_show(request, job_id):
                 "rsl_result": job.rsl_result,
                 "ai_bot_result": job.ai_bot_result,
                 "metadata_result": job.metadata_result,
+                "cc_result": job.cc_result,
+                "sitemap_analysis_result": job.sitemap_analysis_result,
+                "frequency_result": job.frequency_result,
+                "news_signals_result": job.news_signals_result,
                 "article_result": job.article_result,
                 "created_at": job.created_at.isoformat(),
             },

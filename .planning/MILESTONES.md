@@ -55,3 +55,30 @@
 
 ---
 
+
+## v2.1 Competitive Intelligence (Shipped: 2026-02-18)
+
+**Delivered:** Competitive intelligence signals in the report card — Common Crawl presence, Google News readiness assessment, and publishing frequency estimation — giving publishers a complete picture of their scraping and discovery posture.
+
+**Phases completed:** 13-18 (9 plans total)
+
+**Key accomplishments:**
+- Common Crawl presence detection via CC CDX Index API with page count and crawl date
+- News sitemap detection via `xmlns:news` namespace in discovered sitemaps
+- Publishing frequency estimation from RSS dates with sitemap lastmod fallback and confidence indicator
+- Google News readiness aggregation with 4-tier assessment (strong/moderate/minimal/none)
+- Full pipeline integration with TTL skip paths, SSE progress events, and end-to-end wiring
+- Competitive Intelligence report card section with CC presence, Google News readiness signal breakdown, and update frequency display
+
+**Stats:**
+- 46 files created/modified
+- 6,161 lines added
+- 6 phases, 9 plans
+- 2 days from start to ship (2026-02-17 → 2026-02-18)
+
+**Git range:** `feat(13-01)` → `feat(18-01)`
+
+**What's next:** Authentication, grade computation, batch analysis.
+
+---
+

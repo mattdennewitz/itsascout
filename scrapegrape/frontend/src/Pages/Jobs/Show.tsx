@@ -33,6 +33,8 @@ import {
     Scale,
     FileCode,
     Globe,
+    Newspaper,
+    Clock,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { StatusIndicator } from '@/components/report/StatusIndicator'
@@ -40,6 +42,8 @@ import { PermissionStatus } from '@/components/report/PermissionStatus'
 import { UrlList } from '@/components/report/UrlList'
 import { FormatBadge } from '@/components/report/FormatBadge'
 import { PaywallBadge } from '@/components/report/PaywallBadge'
+import { ReadinessBadge } from '@/components/report/ReadinessBadge'
+import { ConfidenceBadge } from '@/components/report/ConfidenceBadge'
 
 interface PipelineEvent {
     step: string
@@ -68,6 +72,10 @@ interface JobProps {
         sitemap_result: Record<string, unknown> | null
         rss_result: Record<string, unknown> | null
         rsl_result: Record<string, unknown> | null
+        cc_result: Record<string, unknown> | null
+        sitemap_analysis_result: Record<string, unknown> | null
+        frequency_result: Record<string, unknown> | null
+        news_signals_result: Record<string, unknown> | null
         ai_bot_result: Record<string, unknown> | null
         metadata_result: Record<string, unknown> | null
         article_result: Record<string, unknown> | null
@@ -85,9 +93,13 @@ const PIPELINE_STEPS = [
     { key: 'sitemap', label: 'Sitemap Discovery', icon: '7' },
     { key: 'rss', label: 'RSS Feed Discovery', icon: '8' },
     { key: 'rsl', label: 'RSL Detection', icon: '9' },
-    { key: 'article_extraction', label: 'Article Metadata', icon: '10' },
-    { key: 'paywall_detection', label: 'Paywall Detection', icon: '11' },
-    { key: 'metadata_profile', label: 'Metadata Profile', icon: '12' },
+    { key: 'cc', label: 'Common Crawl Presence', icon: '10' },
+    { key: 'sitemap_analysis', label: 'Sitemap Analysis', icon: '11' },
+    { key: 'frequency', label: 'Update Frequency', icon: '12' },
+    { key: 'article_extraction', label: 'Article Metadata', icon: '13' },
+    { key: 'paywall_detection', label: 'Paywall Detection', icon: '14' },
+    { key: 'metadata_profile', label: 'Metadata Profile', icon: '15' },
+    { key: 'google_news', label: 'Google News Readiness', icon: '16' },
 ] as const
 
 function statusBadge(status: string) {
@@ -181,6 +193,18 @@ function stepDataSummary(step: string, data: Record<string, unknown>): string | 
         if (data.rsl_detected) return `RSL detected (${data.count} indicator(s))`
         return 'No RSL licensing detected'
     }
+    if (step === 'cc') {
+        if (data.available === false) return `Data unavailable: ${data.error ?? 'API error'}`
+        if (data.in_index) {
+            const pages = data.page_count as number
+            const crawl = data.latest_crawl as string | undefined
+            let summary = `In index (~${pages.toLocaleString()} pages)`
+            if (crawl) summary += `, last crawled ${crawl}`
+            return summary
+        }
+        if (data.in_index === false) return 'Not found in Common Crawl index'
+        return null
+    }
     if (step === 'article_extraction') {
         const formats = data.formats_found as string[] | undefined
         if (formats && formats.length > 0) return `Found: ${formats.join(', ')}`
@@ -207,6 +231,25 @@ function stepDataSummary(step: string, data: Record<string, unknown>): string | 
     }
     if (step === 'metadata_profile') {
         if (data.summary) return String(data.summary)
+        return null
+    }
+    if (step === 'sitemap_analysis') {
+        if (data.has_news_sitemap === true) return 'News sitemap detected'
+        if (data.has_news_sitemap === false) return 'No news sitemap found'
+        return null
+    }
+    if (step === 'frequency') {
+        const label = data.frequency_label as string | undefined
+        const confidence = data.confidence as string | undefined
+        if (label) return `${label}${confidence ? ` (${confidence} confidence)` : ''}`
+        if (data.error) return `Error: ${String(data.error)}`
+        return 'Could not estimate frequency'
+    }
+    if (step === 'google_news') {
+        const readiness = data.readiness as string | undefined
+        const count = data.signal_count as number | undefined
+        if (readiness) return `Readiness: ${readiness} (${count ?? 0}/3 signals)`
+        if (data.error) return `Error: ${String(data.error)}`
         return null
     }
     if (data.reason) return String(data.reason)
@@ -637,10 +680,119 @@ function ReportCard({ job }: { job: JobProps['job'] }) {
                                     }
                                 </span>
                             </div>
+
                         </CardContent>
                     </CollapsibleContent>
                 </Card>
             </Collapsible>
+
+            {/* Competitive Intelligence */}
+            <Card>
+                <CardHeader>
+                    <CardTitle>Competitive Intelligence</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                    {/* CC Presence */}
+                    <div>
+                        <div className="flex items-center gap-2 mb-2">
+                            <Globe className="size-4 text-muted-foreground" />
+                            <h4 className="text-sm font-medium">Common Crawl Presence</h4>
+                        </div>
+                        {!job.cc_result ? (
+                            <SectionPlaceholder label="Common Crawl" reason="Not checked" />
+                        ) : job.cc_result.available === false ? (
+                            <p className="text-sm text-muted-foreground pl-6">
+                                Unavailable{job.cc_result.error ? `: ${job.cc_result.error}` : ''}
+                            </p>
+                        ) : job.cc_result.in_index === true ? (
+                            <p className="text-sm text-muted-foreground pl-6">
+                                ~{(job.cc_result.page_count as number).toLocaleString()} pages | Last crawled {job.cc_result.latest_crawl as string}
+                            </p>
+                        ) : (
+                            <p className="text-sm text-muted-foreground pl-6">
+                                Not found in Common Crawl index
+                            </p>
+                        )}
+                    </div>
+
+                    {/* Google News Readiness */}
+                    <div>
+                        <div className="flex items-center gap-2 mb-2">
+                            <Newspaper className="size-4 text-muted-foreground" />
+                            <h4 className="text-sm font-medium">Google News Readiness</h4>
+                            {job.news_signals_result && !job.news_signals_result.error && !!job.news_signals_result.readiness && (
+                                <ReadinessBadge level={job.news_signals_result.readiness as string} />
+                            )}
+                        </div>
+                        {!job.news_signals_result ? (
+                            <SectionPlaceholder label="Google News" reason="Not checked" />
+                        ) : job.news_signals_result.error ? (
+                            <p className="text-sm text-muted-foreground pl-6">
+                                Unavailable: {job.news_signals_result.error as string}
+                            </p>
+                        ) : (() => {
+                            const signals = job.news_signals_result.signals as Record<string, unknown>
+                            return (
+                                <div className="space-y-1 pl-6">
+                                    <div className="flex items-center gap-1.5 text-sm">
+                                        {signals.has_news_sitemap ? (
+                                            <CircleCheck className="size-3.5 text-emerald-600 shrink-0" />
+                                        ) : (
+                                            <CircleX className="size-3.5 text-gray-300 shrink-0" />
+                                        )}
+                                        <span className={signals.has_news_sitemap ? 'text-foreground' : 'text-muted-foreground'}>
+                                            News Sitemap
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 text-sm">
+                                        {signals.has_news_article_schema ? (
+                                            <CircleCheck className="size-3.5 text-emerald-600 shrink-0" />
+                                        ) : (
+                                            <CircleX className="size-3.5 text-gray-300 shrink-0" />
+                                        )}
+                                        <span className={signals.has_news_article_schema ? 'text-foreground' : 'text-muted-foreground'}>
+                                            NewsArticle Schema{signals.has_news_article_schema && signals.article_schema_type ? ` (${String(signals.article_schema_type)})` : ''}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 text-sm">
+                                        {signals.has_news_media_org ? (
+                                            <CircleCheck className="size-3.5 text-emerald-600 shrink-0" />
+                                        ) : (
+                                            <CircleX className="size-3.5 text-gray-300 shrink-0" />
+                                        )}
+                                        <span className={signals.has_news_media_org ? 'text-foreground' : 'text-muted-foreground'}>
+                                            NewsMediaOrganization{signals.has_news_media_org && signals.org_schema_type ? ` (${String(signals.org_schema_type)})` : ''}
+                                        </span>
+                                    </div>
+                                </div>
+                            )
+                        })()}
+                    </div>
+
+                    {/* Update Frequency */}
+                    <div>
+                        <div className="flex items-center gap-2 mb-2">
+                            <Clock className="size-4 text-muted-foreground" />
+                            <h4 className="text-sm font-medium">Update Frequency</h4>
+                        </div>
+                        {!job.frequency_result ? (
+                            <SectionPlaceholder label="Update frequency" reason="Not checked" />
+                        ) : !(job.frequency_result.frequency_label as string) ? (
+                            <p className="text-sm text-muted-foreground pl-6">
+                                Could not estimate publishing frequency
+                            </p>
+                        ) : (
+                            <p className="text-sm text-muted-foreground pl-6">
+                                {job.frequency_result.frequency_label as string}{' '}
+                                <ConfidenceBadge level={job.frequency_result.confidence as string} />
+                                {!!job.frequency_result.source && (job.frequency_result.source as string) !== 'none' && (
+                                    <span className="text-xs"> from {job.frequency_result.source as string}</span>
+                                )}
+                            </p>
+                        )}
+                    </div>
+                </CardContent>
+            </Card>
 
             {/* Article Analysis */}
             <Card>
@@ -789,6 +941,18 @@ function Show({ job }: JobProps) {
         }
         if (job.rsl_result) {
             statuses['rsl'] = { step: 'rsl', status: 'completed', data: job.rsl_result }
+        }
+        if (job.cc_result) {
+            statuses['cc'] = { step: 'cc', status: 'completed', data: job.cc_result }
+        }
+        if (job.sitemap_analysis_result) {
+            statuses['sitemap_analysis'] = { step: 'sitemap_analysis', status: 'completed', data: job.sitemap_analysis_result }
+        }
+        if (job.frequency_result) {
+            statuses['frequency'] = { step: 'frequency', status: 'completed', data: job.frequency_result }
+        }
+        if (job.news_signals_result) {
+            statuses['google_news'] = { step: 'google_news', status: 'completed', data: job.news_signals_result }
         }
         if (job.ai_bot_result) {
             statuses['ai_bot_blocking'] = { step: 'ai_bot_blocking', status: 'completed', data: job.ai_bot_result }
@@ -943,7 +1107,7 @@ function Show({ job }: JobProps) {
                 <ReportCard job={job} />
             ) : (
                 <div className="space-y-3">
-                    {PIPELINE_STEPS.slice(0, 9).map((step) => (
+                    {PIPELINE_STEPS.slice(0, 12).map((step) => (
                         <StepCard
                             key={step.key}
                             step={step}
@@ -955,7 +1119,7 @@ function Show({ job }: JobProps) {
                         <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide">Article Analysis</h3>
                     </div>
 
-                    {PIPELINE_STEPS.slice(9).map((step) => (
+                    {PIPELINE_STEPS.slice(12).map((step) => (
                         <StepCard
                             key={step.key}
                             step={step}

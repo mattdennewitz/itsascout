@@ -64,10 +64,10 @@
   1. Publisher model has fields for CC presence, news sitemap, Google News readiness, and update frequency
   2. ResolutionJob model has JSONFields for cc_result, sitemap_analysis_result, frequency_result, and news_signals_result
   3. Migration applies cleanly and existing data is unaffected (all new fields nullable)
-**Plans:** TBD
+**Plans:** 1 plan
 
 Plans:
-- [ ] 13-01: TBD (run /gsd:plan-phase 13 to break down)
+- [ ] 13-01-PLAN.md -- Add competitive intelligence fields to Publisher and ResolutionJob, generate migration, add tests
 
 ### Phase 14: Common Crawl Presence
 

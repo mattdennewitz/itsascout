@@ -45,7 +45,6 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "django_vite",
     "django_object_actions",
     "django_rq",
     "rest_framework",
@@ -53,6 +52,9 @@ INSTALLED_APPS = [
     "ingestion",
     "publishers",
 ]
+
+if DEBUG:
+    INSTALLED_APPS.append("django_vite")
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -128,6 +130,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 STATICFILES_DIRS = [
     BASE_DIR / "frontend" / "dist",
@@ -151,12 +154,13 @@ PUBLISHER_FRESHNESS_TTL = timedelta(hours=24)
 ARTICLE_FRESHNESS_TTL = timedelta(hours=24)
 
 # Django Vite configuration
-DJANGO_VITE = {
-    "default": {
-        "dev_mode": DEBUG,
-        "manifest_path": BASE_DIR / "frontend" / "dist" / "manifest.json",
+if DEBUG:
+    DJANGO_VITE = {
+        "default": {
+            "dev_mode": DEBUG,
+            "manifest_path": BASE_DIR / "frontend" / "dist" / "manifest.json",
+        }
     }
-}
 
 # Inertia configuration
 INERTIA_LAYOUT = 'base.html'

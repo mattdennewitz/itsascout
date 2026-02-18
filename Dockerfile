@@ -35,4 +35,4 @@ COPY --from=frontend-builder /app/frontend/dist /app/scrapegrape/static/dist
 RUN uv run scrapegrape/manage.py collectstatic --noinput
 
 # Set default command for Django (can be overridden by docker-compose or Coolify)
-CMD ["uv", "run", "scrapegrape/manage.py", "runserver", "0.0.0.0:8000"]
+CMD ["gunicorn", "scrapegrape.asgi:application", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000"]

@@ -440,13 +440,44 @@ class TestRunPipeline:
         assert ("pipeline", "completed") in events_published
 
     def test_pipeline_skips_fresh_publisher(self, monkeypatch):
-        """Pipeline skips steps for publisher checked within freshness TTL."""
+        """Pipeline skips steps for publisher checked within freshness TTL
+        and copies results from the most recent prior job."""
         from publishers.pipeline.supervisor import run_pipeline
 
         publisher = PublisherFactory(
             last_checked_at=timezone.now() - timedelta(hours=1)
         )
-        job = ResolutionJobFactory(publisher=publisher, status="pending")
+
+        # Create a prior completed job with cached results
+        prior_job = ResolutionJobFactory(
+            publisher=publisher,
+            status="completed",
+            waf_result={"waf_detected": False, "waf_type": ""},
+            tos_result={"tos_url": "https://example.com/tos", "permissions": []},
+            robots_result={
+                "robots_found": True,
+                "url_allowed": True,
+                "raw_text": "User-agent: *\nAllow: /\n",
+            },
+            sitemap_result={"sitemap_urls": [], "count": 0},
+            rss_result={"feeds": [], "count": 0},
+            rsl_result={"rsl_detected": False},
+            ai_bot_result={"bots": {}},
+            metadata_result={"organization": None},
+        )
+
+        # Create a prior ArticleMetadata so article steps are also skipped
+        ArticleMetadata.objects.create(
+            resolution_job=prior_job,
+            publisher=publisher,
+            article_url=f"https://{publisher.domain}/article",
+        )
+
+        job = ResolutionJobFactory(
+            publisher=publisher,
+            status="pending",
+            canonical_url=f"https://{publisher.domain}/article",
+        )
         events_published = []
 
         monkeypatch.setattr(
@@ -461,43 +492,11 @@ class TestRunPipeline:
             "publishers.pipeline.supervisor.run_waf_step",
             lambda pub: waf_called.append(True) or {"waf_detected": False},
         )
-        monkeypatch.setattr(
-            "publishers.pipeline.supervisor.run_tos_discovery_step",
-            lambda pub: {"tos_url": None},
-        )
-        monkeypatch.setattr(
-            "publishers.pipeline.supervisor.run_tos_evaluation_step",
-            lambda pub, tos_url: {"skipped": True},
-        )
         robots_called = []
         monkeypatch.setattr(
             "publishers.pipeline.supervisor.run_robots_step",
             lambda pub, url: robots_called.append(True)
             or {"robots_found": False},
-        )
-        monkeypatch.setattr(
-            "publishers.pipeline.supervisor.run_sitemap_step",
-            lambda pub, robots_result: {
-                "sitemap_urls": [],
-                "source": "none",
-                "count": 0,
-            },
-        )
-        monkeypatch.setattr(
-            "publishers.pipeline.supervisor._fetch_homepage_html",
-            lambda pub: ("", {}),
-        )
-        monkeypatch.setattr(
-            "publishers.pipeline.supervisor.run_rss_step",
-            lambda pub, html: {"feeds": [], "count": 0},
-        )
-        monkeypatch.setattr(
-            "publishers.pipeline.supervisor.run_rsl_step",
-            lambda pub, robots, html, headers=None: {
-                "rsl_detected": False,
-                "indicators": [],
-                "count": 0,
-            },
         )
 
         run_pipeline(str(job.id))
@@ -519,6 +518,16 @@ class TestRunPipeline:
         assert ("article_extraction", "skipped") in events_published
         assert ("paywall_detection", "skipped") in events_published
         assert ("metadata_profile", "skipped") in events_published
+
+        # Results should have been copied from prior job
+        job.refresh_from_db()
+        assert job.waf_result == prior_job.waf_result
+        assert job.tos_result == prior_job.tos_result
+        assert job.robots_result["robots_found"] is True
+        assert job.robots_result["url_allowed"] is True
+        assert job.sitemap_result == prior_job.sitemap_result
+        assert job.rss_result == prior_job.rss_result
+        assert job.rsl_result == prior_job.rsl_result
 
     def test_pipeline_sets_failed_on_exception(self, monkeypatch):
         """Pipeline sets job status to failed on unhandled exception."""

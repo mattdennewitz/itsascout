@@ -3,12 +3,14 @@
 from django.utils import timezone
 from django_rq import job
 from loguru import logger
+from protego import Protego
 
 from publishers.fetchers.exceptions import AllStrategiesExhausted
 from publishers.fetchers.manager import FetchStrategyManager
 from publishers.models import ArticleMetadata, ResolutionJob
 from publishers.pipeline.events import publish_step_event
 from publishers.pipeline.steps import (
+    ITSASCOUT_USER_AGENT,
     run_ai_bot_blocking_step,
     run_article_extraction_step,
     run_metadata_profile_step,
@@ -86,6 +88,49 @@ def run_pipeline(job_id: str):
             logger.info(
                 f"Skipping publisher steps for {publisher.domain} (fresh)"
             )
+
+            # Copy publisher-level results from the most recent completed job
+            # so the report card renders fully instead of "Not checked".
+            prior = (
+                ResolutionJob.objects.filter(
+                    publisher=publisher, status="completed"
+                )
+                .exclude(id=job_id)
+                .order_by("-created_at")
+                .values(
+                    "waf_result", "tos_result", "robots_result",
+                    "sitemap_result", "rss_result", "rsl_result",
+                    "ai_bot_result", "metadata_result",
+                )
+                .first()
+            )
+            if prior:
+                resolution_job.waf_result = prior["waf_result"]
+                resolution_job.tos_result = prior["tos_result"]
+                resolution_job.robots_result = prior["robots_result"]
+                resolution_job.sitemap_result = prior["sitemap_result"]
+                resolution_job.rss_result = prior["rss_result"]
+                resolution_job.rsl_result = prior["rsl_result"]
+                resolution_job.ai_bot_result = prior["ai_bot_result"]
+                resolution_job.metadata_result = prior["metadata_result"]
+
+                # Re-check URL allowance for THIS specific URL against cached robots.txt
+                raw_text = (prior["robots_result"] or {}).get("raw_text")
+                if raw_text and resolution_job.robots_result:
+                    try:
+                        rp = Protego.parse(raw_text)
+                        resolution_job.robots_result["url_allowed"] = rp.can_fetch(
+                            resolution_job.canonical_url, ITSASCOUT_USER_AGENT
+                        )
+                    except Exception:
+                        pass
+
+                resolution_job.save(update_fields=[
+                    "waf_result", "tos_result", "robots_result",
+                    "sitemap_result", "rss_result", "rsl_result",
+                    "ai_bot_result", "metadata_result",
+                ])
+
             publish_step_event(job_id, "waf", "skipped", {"reason": "fresh"})
             publish_step_event(
                 job_id, "tos_discovery", "skipped", {"reason": "fresh"}

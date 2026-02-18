@@ -37,12 +37,13 @@ def table(request):
 
 def publisher_detail(request, publisher_id):
     publisher = get_object_or_404(Publisher, id=publisher_id)
-    articles = ArticleMetadata.objects.filter(publisher=publisher).order_by("-created_at")[:20]
+    articles = ArticleMetadata.objects.filter(publisher=publisher).select_related("resolution_job").order_by("-created_at")[:20]
     return inertia_render(request, 'Publishers/Detail', props={
         'publisher': PublisherListSerializer(publisher).data,
         'articles': [
             {
                 "id": str(a.id),
+                "job_id": str(a.resolution_job_id),
                 "article_url": a.article_url,
                 "has_jsonld": a.has_jsonld,
                 "has_opengraph": a.has_opengraph,

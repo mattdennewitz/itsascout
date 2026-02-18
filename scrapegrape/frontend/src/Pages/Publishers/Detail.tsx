@@ -44,6 +44,7 @@ import { PaywallBadge } from "@/components/report/PaywallBadge"
 
 interface ArticleData {
   id: string
+  job_id: string
   article_url: string
   has_jsonld: boolean
   has_opengraph: boolean
@@ -335,9 +336,18 @@ function Detail({ publisher, articles = [] }: { publisher: PublisherData; articl
                     <p className="text-xs text-muted-foreground leading-relaxed">{article.metadata_profile}</p>
                   )}
 
-                  <p className="text-xs text-muted-foreground/60 mt-2">
-                    {new Date(article.created_at).toLocaleString()}
-                  </p>
+                  <div className="flex items-center justify-between mt-2">
+                    <p className="text-xs text-muted-foreground/60">
+                      {new Date(article.created_at).toLocaleString()}
+                    </p>
+                    <Link
+                      href={`/jobs/${article.job_id}`}
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
+                    >
+                      View report
+                      <ExternalLink className="size-3" />
+                    </Link>
+                  </div>
                 </div>
               ))}
             </div>

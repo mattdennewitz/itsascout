@@ -1,5 +1,3 @@
-FROM python:3.12-slim
-
 # Stage 1: Frontend Builder
 FROM node:24-slim as frontend-builder
 WORKDIR /app/frontend
@@ -35,4 +33,4 @@ COPY --from=frontend-builder /app/frontend/dist /app/scrapegrape/static/dist
 RUN uv run scrapegrape/manage.py collectstatic --noinput
 
 # Set default command for Django (can be overridden by docker-compose or Coolify)
-CMD ["gunicorn", "scrapegrape.asgi:application", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000"]
+CMD ["uv", "run", "gunicorn", "scrapegrape.asgi:application", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000"]

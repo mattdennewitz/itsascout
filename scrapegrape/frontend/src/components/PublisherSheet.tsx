@@ -16,18 +16,8 @@ import {
   ShieldAlert,
   ShieldOff,
 } from "lucide-react"
-import type { Publisher, Permission } from "@/datatable/columns"
+import type { Publisher } from "@/datatable/columns"
 
-function permissionLabel(status: Permission["permission"]) {
-  switch (status) {
-    case "explicitly_permitted":
-      return "Permitted"
-    case "explicitly_prohibited":
-      return "Prohibited"
-    case "conditional_ambiguous":
-      return "Conditional"
-  }
-}
 
 function StatusRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (

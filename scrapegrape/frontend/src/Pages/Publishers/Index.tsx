@@ -1,7 +1,7 @@
 import { DataTable } from '@/datatable/table'
 import { columns, type Publisher } from '@/datatable/columns'
 import AppLayout from '@/Layouts/AppLayout'
-import { Link, router, usePage, Deferred } from '@inertiajs/react'
+import { router, usePage, Deferred } from '@inertiajs/react'
 import { useState, useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'

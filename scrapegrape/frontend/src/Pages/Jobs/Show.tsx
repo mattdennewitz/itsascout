@@ -330,7 +330,7 @@ function StepCard({ step, event }: { step: typeof PIPELINE_STEPS[number]; event:
             {event?.status === 'skipped' && !summary && (
                 <p className="text-xs mt-1 text-gray-500">Skipped (publisher recently checked)</p>
             )}
-            {event?.status === 'failed' && event.data?.error && (
+            {event?.status === 'failed' && !!event.data?.error && (
                 <p className="text-xs mt-1 text-red-700">{String(event.data.error)}</p>
             )}
         </div>
@@ -444,20 +444,26 @@ function ReportCard({ job }: { job: JobProps['job'] }) {
     const metadata = job.metadata_result as Record<string, unknown> | null
     const metadataOrg = metadata?.organization as Record<string, unknown> | undefined
 
+    const crawlPermissionStatus: React.ReactNode = !job.robots_result
+        ? <span className="text-sm text-muted-foreground italic">Not checked</span>
+        : !!job.robots_result.url_allowed
+            ? <span className="inline-flex items-center gap-1.5 text-sm text-emerald-700"><CircleCheck className="size-4" />Allowed by robots.txt</span>
+            : <span className="inline-flex items-center gap-1.5 text-sm text-red-600"><CircleX className="size-4" />Disallowed by robots.txt</span>
+
     return (
         <div className="space-y-6">
             {/* Publisher metadata info row */}
-            {metadata?.found && metadataOrg && (
+            {!!metadata?.found && metadataOrg && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Globe className="size-3.5" />
                     <span className="font-medium">{metadataOrg.name as string}</span>
-                    {metadataOrg.type && (
+                    {!!metadataOrg.type && (
                         <>
                             <span className="text-border">|</span>
                             <span>{metadataOrg.type as string}</span>
                         </>
                     )}
-                    {metadata.source && (
+                    {!!metadata.source && (
                         <>
                             <span className="text-border">|</span>
                             <span className="text-xs">via {metadata.source as string}</span>
@@ -555,7 +561,7 @@ function ReportCard({ job }: { job: JobProps['job'] }) {
                                         <ChevronRight className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
                                         <CardTitle>Terms of Service</CardTitle>
                                     </div>
-                                    {job.tos_result.tos_url && (
+                                    {!!job.tos_result.tos_url && (
                                         <a
                                             href={job.tos_result.tos_url as string}
                                             target="_blank"
@@ -726,42 +732,42 @@ function ReportCard({ job }: { job: JobProps['job'] }) {
                         </div>
                         {!job.news_signals_result ? (
                             <SectionPlaceholder label="Google News" reason="Not checked" />
-                        ) : job.news_signals_result.error ? (
+                        ) : !!job.news_signals_result.error ? (
                             <p className="text-sm text-muted-foreground pl-6">
                                 Unavailable: {job.news_signals_result.error as string}
                             </p>
-                        ) : (() => {
+                        ) : ((): React.ReactNode => {
                             const signals = job.news_signals_result.signals as Record<string, unknown>
                             return (
                                 <div className="space-y-1 pl-6">
                                     <div className="flex items-center gap-1.5 text-sm">
-                                        {signals.has_news_sitemap ? (
+                                        {!!signals.has_news_sitemap ? (
                                             <CircleCheck className="size-3.5 text-emerald-600 shrink-0" />
                                         ) : (
                                             <CircleX className="size-3.5 text-gray-300 shrink-0" />
                                         )}
-                                        <span className={signals.has_news_sitemap ? 'text-foreground' : 'text-muted-foreground'}>
+                                        <span className={!!signals.has_news_sitemap ? 'text-foreground' : 'text-muted-foreground'}>
                                             News Sitemap
                                         </span>
                                     </div>
                                     <div className="flex items-center gap-1.5 text-sm">
-                                        {signals.has_news_article_schema ? (
+                                        {!!signals.has_news_article_schema ? (
                                             <CircleCheck className="size-3.5 text-emerald-600 shrink-0" />
                                         ) : (
                                             <CircleX className="size-3.5 text-gray-300 shrink-0" />
                                         )}
-                                        <span className={signals.has_news_article_schema ? 'text-foreground' : 'text-muted-foreground'}>
-                                            NewsArticle Schema{signals.has_news_article_schema && signals.article_schema_type ? ` (${String(signals.article_schema_type)})` : ''}
+                                        <span className={!!signals.has_news_article_schema ? 'text-foreground' : 'text-muted-foreground'}>
+                                            NewsArticle Schema{!!signals.has_news_article_schema && signals.article_schema_type ? ` (${String(signals.article_schema_type)})` : ''}
                                         </span>
                                     </div>
                                     <div className="flex items-center gap-1.5 text-sm">
-                                        {signals.has_news_media_org ? (
+                                        {!!signals.has_news_media_org ? (
                                             <CircleCheck className="size-3.5 text-emerald-600 shrink-0" />
                                         ) : (
                                             <CircleX className="size-3.5 text-gray-300 shrink-0" />
                                         )}
-                                        <span className={signals.has_news_media_org ? 'text-foreground' : 'text-muted-foreground'}>
-                                            NewsMediaOrganization{signals.has_news_media_org && signals.org_schema_type ? ` (${String(signals.org_schema_type)})` : ''}
+                                        <span className={!!signals.has_news_media_org ? 'text-foreground' : 'text-muted-foreground'}>
+                                            NewsMediaOrganization{!!signals.has_news_media_org && signals.org_schema_type ? ` (${String(signals.org_schema_type)})` : ''}
                                         </span>
                                     </div>
                                 </div>
@@ -800,23 +806,13 @@ function ReportCard({ job }: { job: JobProps['job'] }) {
                     <CardTitle>Article Analysis</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+
+
                     {/* Crawl Permission */}
                     <div className="flex items-center gap-3">
                         <Bot className="size-4 text-muted-foreground shrink-0" />
                         <span className="text-sm font-medium">Crawl Permission:</span>
-                        {!job.robots_result ? (
-                            <span className="text-sm text-muted-foreground italic">Not checked</span>
-                        ) : job.robots_result.url_allowed ? (
-                            <span className="inline-flex items-center gap-1.5 text-sm text-emerald-700">
-                                <CircleCheck className="size-4" />
-                                Allowed by robots.txt
-                            </span>
-                        ) : (
-                            <span className="inline-flex items-center gap-1.5 text-sm text-red-600">
-                                <CircleX className="size-4" />
-                                Disallowed by robots.txt
-                            </span>
-                        )}
+                        {crawlPermissionStatus}
                     </div>
 
                     {/* Paywall Status */}
@@ -825,7 +821,6 @@ function ReportCard({ job }: { job: JobProps['job'] }) {
                         <span className="text-sm font-medium">Paywall:</span>
                         <PaywallBadge status={(paywall?.paywall_status as string) ?? 'unknown'} />
                     </div>
-
                     {/* Format Badges */}
                     <div>
                         <div className="flex items-center gap-2 mb-2">
@@ -845,7 +840,7 @@ function ReportCard({ job }: { job: JobProps['job'] }) {
                     </div>
 
                     {/* Metadata Profile */}
-                    {profile?.summary && (
+                    {!!profile?.summary && (
                         <div>
                             <div className="flex items-center gap-2 mb-1">
                                 <FileText className="size-4 text-muted-foreground" />

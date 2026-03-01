@@ -16,6 +16,7 @@ dependencies = [
     "extruct>=0.18.0",
     "factory-boy>=3.3.3",
     "feedparser==6.0.12",
+    "gunicorn>=22.0.0",
     "httpx>=0.28.1",
     "inertia-django>=1.2.0",
     "logfire>=3.24.0",
@@ -32,6 +33,7 @@ dependencies = [
     "requests>=2.32.4",
     "sh>=2.2.2",
     "tqdm>=4.67.1",
+    "uvicorn>=0.30.1",
     "w3lib>=2.4.0",
     "wafw00f>=2.3.1",
 ]
